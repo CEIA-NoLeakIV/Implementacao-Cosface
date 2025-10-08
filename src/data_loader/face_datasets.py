@@ -1,0 +1,133 @@
+import os
+import random
+from typing import List, Sequence
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers
+
+
+def get_train_val_datasets(path, image_size, batch_size, validation_split=0.02, fraction=1.0):
+    """Cria datasets de treino/validação usando uma fração do dataset e aplica augments."""
+    all_class_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+    random.shuffle(all_class_dirs)
+    num_classes_to_use = int(len(all_class_dirs) * fraction)
+    selected_class_dirs = all_class_dirs[:num_classes_to_use]
+    print(f"Usando uma fração de {fraction*100:.1f}% do dataset: {num_classes_to_use} de {len(all_class_dirs)} classes.")
+
+    file_paths = []
+    labels = []
+    label_to_int = {name: i for i, name in enumerate(selected_class_dirs)}
+
+    for class_name in selected_class_dirs:
+        class_dir = os.path.join(path, class_name)
+        for fname in os.listdir(class_dir):
+            file_paths.append(os.path.join(class_dir, fname))
+            labels.append(label_to_int[class_name])
+
+    path_ds = tf.data.Dataset.from_tensor_slices(file_paths)
+    label_ds = tf.data.Dataset.from_tensor_slices(labels)
+    image_label_ds = tf.data.Dataset.zip((path_ds, label_ds))
+    image_label_ds = image_label_ds.shuffle(buffer_size=len(file_paths), seed=123)
+
+    val_size = int(len(file_paths) * validation_split)
+    train_ds = image_label_ds.skip(val_size)
+    val_ds = image_label_ds.take(val_size)
+
+    def load_image(path, label):
+        img = tf.io.read_file(path)
+        img = tf.image.decode_jpeg(img, channels=3)
+        img = tf.image.resize(img, image_size)
+        return img, label
+
+    def augment_and_prepare(image, label):
+        one_hot_label = tf.one_hot(label, depth=num_classes_to_use)
+        image = data_augmentation(image, training=True)
+        image = tf.keras.applications.resnet50.preprocess_input(image)
+        return (image, one_hot_label), one_hot_label
+
+    def validate_and_prepare(image, label):
+        one_hot_label = tf.one_hot(label, depth=num_classes_to_use)
+        image = tf.keras.applications.resnet50.preprocess_input(image)
+        return (image, one_hot_label), one_hot_label
+
+    train_ds = train_ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    train_ds = train_ds.map(augment_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
+    train_ds = train_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+    val_ds = val_ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    val_ds = val_ds.map(validate_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
+    val_ds = val_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+    return train_ds, val_ds, num_classes_to_use
+
+
+class LFWValidationCallback(tf.keras.callbacks.Callback):
+    """Valida o modelo no LFW com embeddings normalizados e threshold dinâmico."""
+    def __init__(self, feature_extractor, lfw_path, pairs_path, image_size):
+        super().__init__()
+        self.feature_extractor = feature_extractor
+        self.lfw_path = lfw_path
+        self.image_size = image_size
+        self.pairs = self._read_pairs(pairs_path)
+
+    def _read_pairs(self, pairs_filename):
+        pairs = []
+        with open(pairs_filename, 'r') as f:
+            for line in f.readlines()[1:]:
+                pairs.append(line.strip().split())
+        return pairs
+
+    def _preprocess_image(self, file_path):
+        img = tf.io.read_file(file_path)
+        img = tf.image.decode_jpeg(img, channels=3)
+        img = tf.image.resize(img, self.image_size)
+        # mesmo preprocess_input do treino
+        img = tf.keras.applications.resnet50.preprocess_input(img)
+        return img
+
+    def on_epoch_end(self, epoch, logs=None):
+        print("\nIniciando validação no LFW...")
+        embeddings1 = []
+        embeddings2 = []
+        actual_issame = []
+
+        for pair in self.pairs:
+            if len(pair) == 3:
+                path1 = os.path.join(self.lfw_path, pair[0], f"{pair[0]}_{int(pair[1]):04d}.jpg")
+                path2 = os.path.join(self.lfw_path, pair[0], f"{pair[0]}_{int(pair[2]):04d}.jpg")
+                actual_issame.append(True)
+            else:
+                path1 = os.path.join(self.lfw_path, pair[0], f"{pair[0]}_{int(pair[1]):04d}.jpg")
+                path2 = os.path.join(self.lfw_path, pair[2], f"{pair[2]}_{int(pair[3]):04d}.jpg")
+                actual_issame.append(False)
+
+            img1 = self._preprocess_image(path1)
+            img2 = self._preprocess_image(path2)
+
+            emb1 = self.feature_extractor(tf.expand_dims(img1, axis=0), training=False)
+            emb2 = self.feature_extractor(tf.expand_dims(img2, axis=0), training=False)
+
+            # normaliza embeddings
+            emb1 = tf.nn.l2_normalize(emb1, axis=1)
+            emb2 = tf.nn.l2_normalize(emb2, axis=1)
+
+            embeddings1.append(emb1)
+            embeddings2.append(emb2)
+
+        emb1_tensor = tf.concat(embeddings1, axis=0)
+        emb2_tensor = tf.concat(embeddings2, axis=0)
+        similarities = tf.reduce_sum(tf.multiply(emb1_tensor, emb2_tensor), axis=1).numpy()
+
+        # encontra o melhor threshold
+        best_acc = 0.0
+        best_thr = 0.0
+        thresholds = np.linspace(-1.0, 1.0, 401)
+        for thr in thresholds:
+            preds = similarities > thr
+            acc = np.mean(preds == np.array(actual_issame))
+            if acc > best_acc:
+                best_acc = acc
+                best_thr = thr
+        print(f"LFW Validação - Melhor threshold: {best_thr:.3f}, Acurácia: {best_acc:.4f}")
+        if logs is not None:
+            logs['val_lfw_accuracy'] = best_acc

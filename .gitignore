@@ -1,0 +1,20 @@
+# Ambientes Virtuais
+venv/
+env/
+.env
+
+# Arquivos Python
+__pycache__/
+*.pyc
+
+# Notebooks e Dados
+.ipynb_checkpoints/
+data/
+
+# Modelos e Logs (Artefatos de Experimentos)
+models/
+deliverables/
+reports/figures/*.png
+
+# Arquivos de Sistema
+.DS_Store
