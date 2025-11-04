@@ -9,6 +9,7 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
+import tensorflow as tf
 
 from src.losses.margin_losses import CosFace
 
@@ -27,26 +28,25 @@ def _build_classification_head(config, backbone_output):
     x = BatchNormalization(name="embedding_dense_bn")(x)
     return x
 
+print(">>> EXECUTANDO ARQUIVO DE MODELO CORRETO <<<")
+
 def create_resnet50_cosface(config):
     """Create the ResNet50 backbone followed by a CosFace classification head."""
 
-    backbone = ResNet50(include_top=False, weights="imagenet", input_shape=config.input_shape)
-    backbone.trainable = True
-
-    # Freeze the early layers: only the last ``trainable_backbone_layers`` are
-    # kept trainable during fine-tuning.  The training pipeline will initially
-    # freeze the entire backbone before warming up the classification head.
-    if config.trainable_backbone_layers > 0:
-        for layer in backbone.layers[:-config.trainable_backbone_layers]:
-            layer.trainable = False
+    # O próprio modelo ResNet50 pode ser tratado como uma camada e nomeado.
+    backbone = ResNet50(include_top=False, weights="imagenet", input_shape=config.input_shape, name="resnet50_backbone")
+    backbone.trainable = False
 
     input_image = backbone.input
-    input_label = Input(shape=(config.num_classes,), name="label_input")
+    num_classes = getattr(config, "num_classes", None)
+    if num_classes is None:
+        num_classes = getattr(config, "NUM_CLASSES")
+    input_label = Input(shape=(num_classes,), name="label_input")
 
     embeddings = _build_classification_head(config, backbone.output)
 
     cosface_logits = CosFace(
-        config.num_classes,
+        num_classes,
         s=config.cosine_scale,
         m=config.cosine_margin,
         name="cosface_loss",
@@ -55,6 +55,6 @@ def create_resnet50_cosface(config):
     model = Model(inputs=[input_image, input_label], outputs=cosface_logits, name="resnet50_cosface")
     feature_extractor = Model(inputs=input_image, outputs=embeddings, name="resnet50_feature_extractor")
 
-    return model, feature_extractor
+    return model, feature_extractor, backbone
 
-    __all__ = ["create_resnet50_cosface"]
+__all__ = ["create_resnet50_cosface"]

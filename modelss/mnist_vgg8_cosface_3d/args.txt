@@ -1,0 +1,10 @@
+name: mnist_vgg8_cosface_3d
+arch: vgg8_cosface
+num_features: 3
+scheduler: CosineAnnealing
+epochs: 50
+batch_size: 64
+optimizer: SGD
+lr: 0.1
+min_lr: 0.001
+momentum: 0.5

@@ -10,7 +10,7 @@ if gpus:
   try:
     for gpu in gpus:
       tf.config.experimental.set_memory_growth(gpu, True)
-    print(f"Otimização de memória (Memory Growth) ativada para {len(gpus)} GPU(s).")
+    print(f"Otimização de memória (Memory Growth) ativada para {len(gpus)} GPU(s).") 
   except RuntimeError as e:
     print(e)
 # --- FIM DA OTIMIZAÇÃO ---

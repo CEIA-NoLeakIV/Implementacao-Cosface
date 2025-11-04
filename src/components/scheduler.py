@@ -11,7 +11,7 @@ class CosineAnnealingScheduler(Callback):
         super(CosineAnnealingScheduler, self).__init__()
         self.T_max = T_max
         self.eta_max = eta_max
-        self.eta_min = eta_min
+        self.eta_min = eta_min 
         self.verbose = verbose
 
     def on_epoch_begin(self, epoch, logs=None):

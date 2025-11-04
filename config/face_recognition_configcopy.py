@@ -5,7 +5,19 @@ from dataclasses import dataclass, field
 from typing import Any, Dict
 
 FILE_PATH = Path(__file__).resolve()
-PROJECT_ROOT = FILE_PATH.parents[4]
+
+# Tenta detectar automaticamente a raiz do projeto buscando a pasta "app"
+for parent in FILE_PATH.parents:
+    if parent.name == "app":  # ajuste se o nome do diretório raiz for outro
+        PROJECT_ROOT = parent
+        break
+else:
+    # fallback: assume o diretório do arquivo
+    PROJECT_ROOT = FILE_PATH.parent
+
+print(f"[DEBUG] FILE_PATH = {FILE_PATH}")
+print(f"[DEBUG] PROJECT_ROOT = {PROJECT_ROOT}")
+
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "data"
 DATA_ROOT = os.environ.get("DATA_ROOT", str(DEFAULT_DATA_ROOT))
 

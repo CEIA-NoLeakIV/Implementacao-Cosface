@@ -59,7 +59,7 @@ def vgg8_arcface(args):
     x = BatchNormalization()(x)
     output = ArcFace(10, regularizer=regularizers.l2(weight_decay))([x, y])
 
-    return Model([input, y], output)
+    return Model([input, y], output) 
 
 
 def vgg8_cosface(args):

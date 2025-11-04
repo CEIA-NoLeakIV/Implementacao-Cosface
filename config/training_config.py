@@ -17,7 +17,7 @@ class CosFaceConfig:
 
 # --- Parâmetros do Modelo Baseline ---
 class BaselineConfig:
-    EMBEDDING_SIZE = 512
+    EMBEDDING_SIZE = 512 
     NUM_CLASSES = 480 
     CHECKPOINT_PATH = 'models/baseline_model_epoch_20.pth'
 

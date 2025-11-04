@@ -58,10 +58,15 @@ def run_face_training(config, dataset_path, resume_training=False):
         dataset_path,
         config.image_size,
         config.batch_size,
-        fraction=config.dataset_fraction,
     )
     config.update_num_classes(num_classes_in_subset)
     print(f"Número de classes no subset: {config.num_classes}")
+
+    # Mapear o dataset para o formato de entrada e alvo esperado pelo modelo
+    train_dataset = train_dataset.map(
+        lambda image, label: ((image, tf.one_hot(label, depth=config.num_classes)), tf.one_hot(label, depth=config.num_classes)),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
 
     initial_epoch = 0
     model = None

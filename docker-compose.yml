@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  cosface:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cosface:latest
+    container_name: cosface_container
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - /home/ubuntu/noleak/EmbeddingFramework/data:/data1
+      - /home/ubuntu/noleak/face_embeddings/data:/data2
+      - ./experiments:/app/experiments  # Montar os resultados no container
+    working_dir: /app
+    stdin_open: true
+    tty: true

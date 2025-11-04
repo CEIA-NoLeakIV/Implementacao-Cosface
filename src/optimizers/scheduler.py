@@ -25,4 +25,11 @@ class CosineAnnealingScheduler(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
-        logs['lr'] = self.model.optimizer.learning_rate
+        lr_tensor = getattr(self.model.optimizer, 'learning_rate', None)
+        if lr_tensor is not None:
+            lr_value = lr_tensor
+            if hasattr(lr_tensor, 'numpy'):
+                lr_value = lr_tensor.numpy()
+            elif hasattr(lr_tensor, 'assign'):
+                lr_value = K.get_value(lr_tensor)
+            logs['lr'] = float(lr_value)

@@ -18,3 +18,11 @@ reports/figures/*.png
 
 # Arquivos de Sistema
 .DS_Store
+
+# Arquivos de Checkpoint de Treinamento
+echo "*.pth" >> .gitignore
+echo "*.ckpt" >> .gitignore
+echo "data/datasets/" >> .gitignore
+echo "modelss/*.h5" >> .gitignore
+echo "modelss/*.keras" >> .gitignore
+echo "modelss/*.zip" >> .gitignore

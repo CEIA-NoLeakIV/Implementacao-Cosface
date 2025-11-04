@@ -1,62 +1,107 @@
 import os
 import random
-from typing import List, Sequence
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers
 
+# Lightweight augmentation pipeline reused across training batches.
+data_augmentation = tf.keras.Sequential(
+    [
+        layers.RandomFlip("horizontal"),
+        layers.RandomRotation(0.05),
+        layers.RandomZoom(0.1),
+    ],
+    name="data_augmentation",
+)
+
 
 def get_train_val_datasets(path, image_size, batch_size, validation_split=0.02, fraction=1.0):
-    """Cria datasets de treino/validação usando uma fração do dataset e aplica augments."""
-    all_class_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
-    random.shuffle(all_class_dirs)
-    num_classes_to_use = int(len(all_class_dirs) * fraction)
-    selected_class_dirs = all_class_dirs[:num_classes_to_use]
-    print(f"Usando uma fração de {fraction*100:.1f}% do dataset: {num_classes_to_use} de {len(all_class_dirs)} classes.")
+    """
+    Cria datasets de treino/validação de forma inteligente.
+    Detecta se o 'path' contém subpastas 'train' e 'val'.
+    """
+    if not os.path.isdir(path):
+        data_root = os.environ.get("DATA_ROOT", "<não definido>")
+        raise FileNotFoundError(
+            f"Diretório do dataset não encontrado: {path}. "
+            f"Defina DATA_ROOT apontando para a pasta que contém 'raw/vggface2_112x112'. "
+            f"DATA_ROOT atual: {data_root}"
+        )
 
-    file_paths = []
-    labels = []
-    label_to_int = {name: i for i, name in enumerate(selected_class_dirs)}
+    # Lógica para detectar se o dataset é pré-dividido
+    train_path = os.path.join(path, "train")
+    val_path = os.path.join(path, "val")
+    
+    pre_split = os.path.isdir(train_path) and os.path.isdir(val_path)
 
-    for class_name in selected_class_dirs:
-        class_dir = os.path.join(path, class_name)
-        for fname in os.listdir(class_dir):
-            file_paths.append(os.path.join(class_dir, fname))
-            labels.append(label_to_int[class_name])
+    if pre_split:
+        print(f"Dataset pré-dividido detectado. Usando '{train_path}' para treino e '{val_path}' para validação.")
+        train_ds = tf.keras.utils.image_dataset_from_directory(
+            train_path,
+            labels='inferred',
+            label_mode='categorical',
+            image_size=image_size,
+            interpolation='bilinear',
+            batch_size=batch_size,
+            shuffle=True,
+            seed=123
+        )
+        val_ds = tf.keras.utils.image_dataset_from_directory(
+            val_path,
+            labels='inferred',
+            label_mode='categorical',
+            image_size=image_size,
+            interpolation='bilinear',
+            batch_size=batch_size,
+            shuffle=False, # Validação não precisa de shuffle
+            seed=123
+        )
+        # O número de classes é o número de pastas no diretório de treino
+        num_classes_to_use = len(os.listdir(train_path))
 
-    path_ds = tf.data.Dataset.from_tensor_slices(file_paths)
-    label_ds = tf.data.Dataset.from_tensor_slices(labels)
-    image_label_ds = tf.data.Dataset.zip((path_ds, label_ds))
-    image_label_ds = image_label_ds.shuffle(buffer_size=len(file_paths), seed=123)
+    else:
+        print(f"Dataset não-dividido detectado. Criando divisão de {validation_split*100}% a partir de '{path}'.")
+        # Mantém o comportamento antigo de criar a divisão
+        train_ds = tf.keras.utils.image_dataset_from_directory(
+            path,
+            labels='inferred',
+            label_mode='categorical',
+            image_size=image_size,
+            interpolation='bilinear',
+            batch_size=batch_size,
+            shuffle=True,
+            seed=123,
+            validation_split=validation_split,
+            subset='training'
+        )
+        val_ds = tf.keras.utils.image_dataset_from_directory(
+            path,
+            labels='inferred',
+            label_mode='categorical',
+            image_size=image_size,
+            interpolation='bilinear',
+            batch_size=batch_size,
+            shuffle=False,
+            seed=123,
+            validation_split=validation_split,
+            subset='validation'
+        )
+        num_classes_to_use = len(os.listdir(path))
 
-    val_size = int(len(file_paths) * validation_split)
-    train_ds = image_label_ds.skip(val_size)
-    val_ds = image_label_ds.take(val_size)
-
-    def load_image(path, label):
-        img = tf.io.read_file(path)
-        img = tf.image.decode_jpeg(img, channels=3)
-        img = tf.image.resize(img, image_size)
-        return img, label
-
+    # As funções de pré-processamento e o resto do pipeline permanecem os mesmos
     def augment_and_prepare(image, label):
-        one_hot_label = tf.one_hot(label, depth=num_classes_to_use)
+        one_hot_label = label # O label já vem como one-hot de image_dataset_from_directory
         image = data_augmentation(image, training=True)
         image = tf.keras.applications.resnet50.preprocess_input(image)
         return (image, one_hot_label), one_hot_label
 
     def validate_and_prepare(image, label):
-        one_hot_label = tf.one_hot(label, depth=num_classes_to_use)
+        one_hot_label = label # O label já vem como one-hot
         image = tf.keras.applications.resnet50.preprocess_input(image)
         return (image, one_hot_label), one_hot_label
 
-    train_ds = train_ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
-    train_ds = train_ds.map(augment_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
-    train_ds = train_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-
-    val_ds = val_ds.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
-    val_ds = val_ds.map(validate_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
-    val_ds = val_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.map(augment_and_prepare, num_parallel_calls=tf.data.AUTOTUNE).prefetch(tf.data.AUTOTUNE)
+    val_ds = val_ds.map(validate_and_prepare, num_parallel_calls=tf.data.AUTOTUNE).prefetch(tf.data.AUTOTUNE)
 
     return train_ds, val_ds, num_classes_to_use
 

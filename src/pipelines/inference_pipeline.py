@@ -13,7 +13,7 @@ def run_cosface_inference(cosface_config, inference_config):
     """
     Executa a inferência apenas no modelo CosFace para extrair e visualizar embeddings.
     """
-    print("--- Iniciando Pipeline de Inferência do Modelo CosFace ---")
+    print("--- Iniciando Pipeline de Inferência do Modelo CosFace ---") 
     
     # 1. Carregar Dados
     (_, _), (X_test, y_test) = mnist.load_data()
