@@ -99,6 +99,14 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
 - Realiza a validação do modelo treinado.
 - Suporta validação em múltiplos datasets.
 
+### `run_finetuning.py`
+- Realiza fine-tuning de modelos pré-treinados em novos datasets.
+- Oferece 3 estratégias diferentes de fine-tuning:
+  1. **Full Fine-tuning**: Todas as camadas treináveis
+  2. **Partial Fine-tuning**: Apenas últimas N camadas
+  3. **Differential LR Fine-tuning**: Learning rates diferenciados
+- Consulte `FINETUNING.md` para documentação completa.
+
 ---
 
 ## Como Usar o Framework
@@ -113,7 +121,19 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
    python run_validation.py --model_path /path/to/checkpoint --dataset_path /path/to/validation/dataset
    ```
 
-3. **Estrutura de Resultados:**
+3. **Realizar Fine-tuning:**
+   ```bash
+   python run_finetuning.py \
+       --strategy 2 \
+       --pretrained_model experiments/Resnet50_vgg_cropado_CelebA/checkpoints/epoch_30.keras \
+       --dataset_path /dados/datasets/aligned_112x112/vggface2_dataset_all_splits_merged/ \
+       --output_dir experiments/finetuning_strategy2 \
+       --epochs 30 \
+       --num_layers 10
+   ```
+   Consulte `FINETUNING.md` para guia completo e exemplos detalhados.
+
+4. **Estrutura de Resultados:**
    - Checkpoints, logs e figuras são salvos na pasta `experiments/`.
 
 ---
