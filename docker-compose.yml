@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  cosface:
+    build: .
+    image: cosface:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./data:/workspace/cosface/data
+      - ./weights:/workspace/cosface/weights
+      - ./metrics:/workspace/cosface/metrics
+    working_dir: /workspace/cosface
+    command: bash
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

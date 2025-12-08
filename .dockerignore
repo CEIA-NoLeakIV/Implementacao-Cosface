@@ -1,0 +1,44 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.ipynb_checkpoints
+.git
+.gitignore
+assets/
+weights/*.ckpt
+weights/*.pth
+weights/*.pt
+metrics/
+
+# --- Dados e Pesos ---
+data/
+weights/
+assets/
+
+# --- Python & Cache (O que você pediu) ---
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+face_validation_cache/
+landmark_cache/
+
+# --- Ambientes Virtuais (Essencial para não quebrar o build) ---
+venv/
+.venv/
+env/
+
+# --- Segurança (CRÍTICO) ---
+.env
+.env.local
+.env.*
+
+# --- Git & Docker ---
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md
