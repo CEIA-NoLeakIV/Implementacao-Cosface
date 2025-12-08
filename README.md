@@ -44,6 +44,9 @@ pip install uniface==1.1.2
 # 3. Garantir ONNX Runtime GPU (para extração rápida de landmarks)
 pip install onnxruntime-gpu
 
+bash```
+
+
 🚀 Como Usar
 
 Devido a conflitos de alocação de memória e drivers CUDA entre o PyTorch (treino) e o ONNX Runtime (detecção de faces), o processo foi dividido em dois scripts sequenciais.
