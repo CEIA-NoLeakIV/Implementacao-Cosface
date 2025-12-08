@@ -8,11 +8,11 @@ A rede neural utiliza uma abordagem de fusão tardia de características (*late 
 
 1.  **Ramo Visual (Backbone):**
     * **Entrada:** Imagem facial alinhada (112x112 RGB).
-    * **Modelo:** ResNet50 (pré-treinada na ImageNet) ou MobileNetV3.
+    * **Modelo:** ResNet50 (pré-treinada na ImageNet).
     * **Saída:** Vetor de *embedding* visual (512 dimensões).
 
 2.  **Ramo Geométrico (Landmark Encoder):**
-    * **Entrada:** Coordenadas normalizadas de 5 landmarks faciais (olho esquerdo, olho direito, nariz, boca esquerda, boca direita).
+    * **Entrada:** Coordenadas normalizadas de 5 ou 7 landmarks faciais (olho esquerdo, olho direito, nariz, boca esquerda, boca direita, queixo, maxiliar).
     * **Modelo:** MLP (Multi-Layer Perceptron) com camadas Lineares, BatchNorm e PReLU.
     * **Saída:** Vetor de *embedding* geométrico (128 dimensões).
 
@@ -27,7 +27,7 @@ A rede neural utiliza uma abordagem de fusão tardia de características (*late 
 
 ## 🛠️ Requisitos e Instalação
 
-O projeto requer um ambiente Python 3.10+ e bibliotecas específicas para evitar conflitos de GPU entre PyTorch e ONNX Runtime.
+O projeto requer um ambiente Conda 3.10+ e bibliotecas específicas para evitar conflitos de GPU entre PyTorch e ONNX Runtime.
 
 ### Dependências Principais
 * PyTorch >= 2.0 (com suporte CUDA)
@@ -71,14 +71,11 @@ O script de treino carrega o cache gerado e treina a rede neural.
 ```bash
 python train.py \
     --root /caminho/para/dataset/train \
-    --database VggFace2 \
     --network resnet50 \
-    --classifier MCP \
     --use-landmarks \
     --landmark-cache-dir landmark_cache \
     --epochs 30 \
     --batch-size 32 \
-    --lr 0.05 \
     --save-path weights/resnet50_run1
 ```
 
