@@ -1,210 +1,106 @@
+# Landmark-Conditioned Face Recognition Framework
 
-# CosFace Face Recognition Framework
+Este repositório contém uma implementação personalizada de um framework de reconhecimento facial que utiliza uma arquitetura de **dois ramos (Two-Branch Architecture)**: um ramo visual (backbone CNN) e um ramo geométrico (Landmarks), fundidos para gerar um embedding final mais robusto.
 
-Framework para treinamento e validação de reconhecimento facial usando CosFace.
+O projeto foi refatorado para resolver conflitos de drivers entre PyTorch e ONNX Runtime, utilizando uma estratégia de execução em duas etapas.
 
+## 🧠 Arquitetura do Modelo
 
+O modelo `LandmarkConditionedModel` combina informações visuais e geométricas:
 
-## Principais Recursos
+1.  **Ramo Visual (Backbone):**
+    * Utiliza **ResNet50** (pré-treinada na ImageNet) ou outras arquiteturas (MobileNet, SphereFace).
+    * Entrada: Imagem RGB (112x112).
+    * Saída: Embedding Visual (512d).
 
-- Treinamento e validação com CosFace (Margin Cosine Product)
-- Métricas completas: ROC, Confusion Matrix, Accuracy, Precision, Recall, F1, AUC, EER, FAR, FRR
-- Detecção de faces opcional via RetinaFace
-- Visualizações automáticas dos resultados
-- Early Stopping configurável
-- Suporte a Multi-GPU
+2.  **Ramo de Landmarks:**
+    * Utiliza um **Encoder MLP** (Multi-Layer Perceptron) personalizado.
+    * Entrada: Coordenadas normalizadas (x, y) de 5 pontos faciais extraídos pelo **Uniface (RetinaFace/SCRFD)**.
+    * Saída: Embedding Geométrico (128d).
 
+3.  **Fusão (Feature Fusion):**
+    * Concatena os vetores visual e geométrico.
+    * Passa por camadas lineares e de normalização (BatchNorm1d + PReLU) para projetar no espaço final de 512 dimensões.
 
-## Instalação
+## 🛠️ Pré-requisitos e Instalação
+
+O projeto requer um ambiente com suporte a GPU e bibliotecas específicas para evitar conflitos de versão.
+
+**Dependências Principais:**
+* Python 3.10+
+* PyTorch (com suporte a CUDA)
+* `uniface` (Versão 1.1.2 ou superior)
+* `onnxruntime-gpu`
+
+**Instalação:**
 
 ```bash
+# 1. Instalar dependências básicas
 pip install -r requirements.txt
-```
 
+# 2. Instalar versão específica do Uniface (Crítico para compatibilidade de retorno)
+pip install uniface==1.1.2
 
+# 3. Garantir ONNX Runtime GPU (para extração rápida de landmarks)
+pip install onnxruntime-gpu
 
-## Como Usar
+🚀 Como Usar
 
-### Treinamento
+Devido a conflitos de alocação de memória e drivers CUDA entre o PyTorch (treino) e o ONNX Runtime (detecção de faces), o processo foi dividido em dois scripts sequenciais.
+Passo 1: Preparação de Dados (Extração de Landmarks)
 
-```bash
+Este script roda isolado, sem carregar o PyTorch, permitindo que o uniface use a GPU livremente para detectar faces e extrair landmarks.
+Bash
+
+python prepare_data.py \
+    --root path/to/dataset/train \
+    --dataset-fraction 0.3 \
+    --cache-dir landmark_cache
+
+    --dataset-fraction: Define a porcentagem do dataset a ser processada (ex: 0.3 para 30%). Útil para Sanity Checks rápidos.
+
+    Saída: Gera um arquivo JSON em landmark_cache/ contendo as coordenadas normalizadas.
+
+Passo 2: Treinamento
+
+O script de treino carrega o cache gerado e inicia o treinamento da rede neural.
+Bash
+
 python train.py \
-    --root data/train/vggface2_aligned \
+    --root path/to/dataset/train \
     --database VggFace2 \
     --network resnet50 \
-    --classifier CosFace \
-    --val-dataset lfw \
-    --val-root data/lfw/val \
-    --epochs 30 \
-    --batch-size 64
-```
+    --classifier MCP \
+    --use-landmarks \
+    --landmark-cache-dir landmark_cache \
+    --dataset-fraction 0.3 \
+    --epochs 25 \
+    --batch-size 32 \
+    --lr 0.001 \
+    --save-path weights/resnet50_landmark
 
-#### Com validação de faces (RetinaFace)
-```bash
-python train.py \
-    --root data/train/vggface2_aligned \
-    --database VggFace2 \
-    --network resnet50 \
-    --classifier CosFace \
-    --val-dataset lfw \
-    --val-root data/lfw/val \
-    --use-retinaface-validation \
-    --no-face-policy exclude \
-    --epochs 30
-```
+Argumentos Importantes:
 
-### Validação
+    --use-landmarks: Ativa a arquitetura de dois ramos e o carregamento do JSON.
 
-Edite os caminhos do modelo, pesos e dados de validação em `evaluate.py` ou `evaluate_original.py`.
+    --dataset-fraction: Deve corresponder à fração usada na preparação.
 
-```bash
-python evaluate.py
-# ou
-python evaluate_original.py
-```
-Os resultados e gráficos serão salvos no diretório configurado.
+    --classifier: Função de perda (ex: MCP para Margin Cosine Product / CosFace).
 
+    --lr: Taxa de aprendizado (Recomendado 0.001 para ResNet50 pré-treinada).
 
+📊 Estrutura de Arquivos
 
-## Arquitetura
+    models/landmark_conditioned.py: Definição da arquitetura de fusão e encoders.
 
-- **Backbone:** ResNet50
-- **Loss:** CosFace (MCP)
-- **Embeddings:** 512 dimensões
+    utils/landmark_annotator.py: Lógica robusta de extração usando Uniface v1.1.2 com fallback de erros.
 
+    prepare_data.py: Script isolado para geração de cache de landmarks.
 
-## Datasets
+    train.py: Script principal de treinamento com suporte a argumentos de landmarks.
 
-**Treinamento:**
-- WebFace, VggFace2, MS1M, VggFaceHQ
+📝 Notas sobre Resultados
 
-**Validação:**
-- LFW, CelebA
+    Loss Function: O uso de CosFace (MCP) com margem 0.40 exige um ajuste fino do Learning Rate.
 
-**Estrutura esperada:**
-```
-data/
-├── train/<dataset_name>/identity_x/img.jpg
-└── lfw/val/<person_name>/<person_name>_0001.jpg
-```
-
-
-## Argumentos Principais
-
-| Argumento                | Tipo   | Default                       | Descrição                                 |
-|--------------------------|--------|-------------------------------|-------------------------------------------|
-| `--root`                 | str    | `data/train/webface_112x112/` | Diretório de imagens de treino            |
-| `--database`             | str    | `WebFace`                     | Dataset: WebFace, VggFace2, MS1M, VggFaceHQ |
-| `--network`              | str    | `resnet50`                    | Arquitetura: resnet50                     |
-| `--classifier`           | str    | `CosFace`                     | Loss function: CosFace                    |
-| `--batch-size`           | int    | 512                           | Tamanho do batch                          |
-| `--epochs`               | int    | 30                            | Número de épocas                          |
-| `--lr`                   | float  | 0.1                           | Learning rate inicial                     |
-| `--momentum`             | float  | 0.9                           | Momentum do SGD                           |
-| `--weight-decay`         | float  | 5e-4                          | Weight decay                              |
-| `--num-workers`          | int    | 8                             | Workers do DataLoader                     |
-| `--lr-scheduler`         | str    | `MultiStepLR`                 | Tipo: MultiStepLR, StepLR                 |
-| `--milestones`           | int[]  | `[10, 20, 25]`                | Épocas para reduzir LR (MultiStepLR)      |
-| `--step-size`            | int    | 10                            | Período de decay (StepLR)                 |
-| `--gamma`                | float  | 0.1                           | Fator multiplicativo de decay             |
-| `--val-dataset`          | str    | `lfw`                         | Dataset de validação: lfw, celeba         |
-| `--val-root`             | str    | `data/lfw/val`                | Diretório do dataset de validação         |
-| `--val-threshold`        | float  | 0.35                          | Threshold de similaridade                 |
-| `--save-path`            | str    | `weights`                      | Diretório para salvar checkpoints         |
-| `--checkpoint`           | str    | None                          | Checkpoint para continuar treino          |
-| `--world-size`           | int    | 1                             | Número de processos distribuídos          |
-| `--local_rank`           | int    | 0                             | Rank local para treinamento distribuído   |
-
-
-## Validação com RetinaFace (Opcional)
-
-Adicione os argumentos abaixo para ativar a validação de faces:
-
-| Argumento                        | Tipo   | Default                  | Descrição                                 |
-|-----------------------------------|--------|--------------------------|-------------------------------------------|
-| `--use-retinaface-validation`     | flag   | False                    | Habilita validação com RetinaFace         |
-| `--no-face-policy`                | str    | `exclude`                | Política para imagens sem face            |
-| `--retinaface-conf-threshold`     | float  | 0.5                      | Threshold de confiança do detector        |
-| `--face-validation-cache-dir`     | str    | `face_validation_cache`  | Diretório de cache                        |
-
-Funcionamento:
-- Primeira época: valida todas as imagens e salva cache
-- Épocas seguintes: usa cache para acelerar
-- Relatório final: estatísticas detalhadas em JSON
-
-
-## Outputs e Métricas
-
-**Diretórios:**
-```
-weights/
-├── resnet50_CosFace_best.ckpt
-├── resnet50_CosFace_last.ckpt
-├── metrics/
-│   ├── epoch_001/lfw_roc_curve.png
-│   ├── epoch_001/lfw_confusion_matrix.png
-│   └── final_evaluation/face_validation_report.json
-└── final_report/
-    ├── training_curves.png
-    ├── confusion_matrix_evolution.png
-    ├── learning_rate_schedule.png
-    ├── all_metrics_overview.png
-    ├── face_validation_stats.png
-    ├── training_history.json
-    └── training_summary.txt
-```
-
-**Métricas:**
-- Treinamento: Loss, Accuracy
-- Validação: Accuracy, Precision, Recall, F1, AUC, EER, FAR, FRR, ROC, Confusion Matrix
-- Face Validation: estatísticas detalhadas (se habilitado)
-
-
-## Avaliação
-
-Execute:
-```bash
-python evaluate.py
-# ou
-python evaluate_original.py
-```
-Para análises avançadas, utilize o notebook `1.Notebooks/Eval.ipynb`.
-
-
-
-## Retomar Treinamento
-
-```bash
-python train.py \
-    --checkpoint weights/resnet50_CosFace_last.ckpt \
-    --root data/train/vggface2_aligned \
-    --database VggFace2 \
-    --network resnet50 \
-    --classifier CosFace
-```
-O histórico de métricas é preservado automaticamente.
-
-
-
-## Multi-GPU
-
-```bash
-python -m torch.distributed.launch \
-    --nproc_per_node=2 \
-    train.py \
-    --world-size 2 \
-    --root data/train/vggface2_aligned \
-    --database VggFace2 \
-    --network resnet50 \
-    --classifier CosFace
-```
-
-
-## Preprocessamento
-
-Imagens devem ser 112x112 pixels, RGB, normalizadas com mean=(0.5, 0.5, 0.5) e std=(0.5, 0.5, 0.5). O framework faz resize e normalização automática.
-
-
-## Licença
-
-Projeto para fins de pesquisa.
+    Comportamento Inicial: É esperado que a acurácia comece baixa e a Loss alta (~20+) nas primeiras épocas devido ao "Cold Start" da camada de fusão, que é inicializada aleatoriamente e precisa se alinhar com o backbone pré-treinado.
