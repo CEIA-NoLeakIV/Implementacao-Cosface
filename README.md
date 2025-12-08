@@ -47,3 +47,61 @@ pip install onnxruntime-gpu
 pip install uniface==1.1.2
 pip install -r requirements.txt
 ```
+## 🚀 Como Usar
+
+Devido a conflitos conhecidos entre os drivers CUDA carregados pelo PyTorch e pelo ONNX Runtime, o processo de treinamento é dividido em duas etapas: Preparação e Treinamento.
+   
+   **Passo 1: Preparação dos Dados (Extração de Landmarks)**
+
+Este script isolado utiliza a GPU exclusivamente para o UniFace detectar faces e extrair landmarks, salvando um cache JSON. Isso evita gargalos de CPU durante o treino.
+Bash
+
+```bash
+python prepare_data.py \
+    --root /caminho/para/dataset/train \
+    --dataset-fraction 1.0  # Use 0.3 para testes rápidos com 30% dos dados
+```
+
+Isso gerará um arquivo landmark_cache/<dataset>_landmarks.json.
+   **Passo 2: Treinamento do Modelo**
+
+O script de treino carrega o cache gerado e treina a rede neural.
+
+```bash
+python train.py \
+    --root /caminho/para/dataset/train \
+    --database VggFace2 \
+    --network resnet50 \
+    --classifier MCP \
+    --use-landmarks \
+    --landmark-cache-dir landmark_cache \
+    --epochs 30 \
+    --batch-size 32 \
+    --lr 0.05 \
+    --save-path weights/resnet50_run1
+```
+
+   **Argumentos Importantes (train.py)**
+   
+Argumento	Descrição
+--use-landmarks	Ativa a arquitetura de dois ramos (Visual + Landmarks).
+--network	Define o backbone visual (ex: resnet50, mobilenetv3_large).
+--dataset-fraction	Define a % do dataset a ser usada (deve corresponder ao cache gerado).
+--lr	Taxa de aprendizado inicial (recomendado 0.05 a 0.001 dependendo do batch).
+
+
+
+📁 Estrutura do Projeto
+
+Cosface_Refactor/
+├── models/
+│   ├── landmark_conditioned.py  # Arquitetura de fusão (Encoder + Fusion)
+│   ├── resnet.py                # Backbone ResNet50 customizado
+│   └── ...
+├── utils/
+│   ├── landmark_annotator.py    # Wrapper robusto para o UniFace/SCRFD
+│   ├── dataset.py               # ImageFolder modificado para carregar landmarks
+│   └── metrics.py               # Implementação do CosFace (MCP)
+├── prepare_data.py              # Script de pré-processamento isolado
+├── train.py                     # Loop principal de treinamento
+└── requirements.txt
