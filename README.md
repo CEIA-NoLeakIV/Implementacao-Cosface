@@ -63,6 +63,7 @@ python prepare_data.py \
 ```
 
 Isso gerará um arquivo landmark_cache/<dataset>_landmarks.json.
+   
    **Passo 2: Treinamento do Modelo**
 
 O script de treino carrega o cache gerado e treina a rede neural.
@@ -88,7 +89,6 @@ Argumento	Descrição
 --network	Define o backbone visual (ex: resnet50, mobilenetv3_large).
 --dataset-fraction	Define a % do dataset a ser usada (deve corresponder ao cache gerado).
 --lr	Taxa de aprendizado inicial (recomendado 0.05 a 0.001 dependendo do batch).
-
 
 
 📁 Estrutura do Projeto
