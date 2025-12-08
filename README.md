@@ -46,4 +46,4 @@ pip install torch torchvision torchaudio --index-url [https://download.pytorch.o
 pip install onnxruntime-gpu
 pip install uniface==1.1.2
 pip install -r requirements.txt
-'''
+```
