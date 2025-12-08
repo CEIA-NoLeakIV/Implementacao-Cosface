@@ -1,109 +1,49 @@
-# Landmark-Conditioned Face Recognition Framework
+# Landmark-Conditioned Face Recognition (CosFace Refactor)
 
-Este repositório contém uma implementação personalizada de um framework de reconhecimento facial que utiliza uma arquitetura de **dois ramos (Two-Branch Architecture)**: um ramo visual (backbone CNN) e um ramo geométrico (Landmarks), fundidos para gerar um embedding final mais robusto.
-
-O projeto foi refatorado para resolver conflitos de drivers entre PyTorch e ONNX Runtime, utilizando uma estratégia de execução em duas etapas.
+Este repositório contém uma implementação de **Reconhecimento Facial Condicionado por Landmarks**, utilizando uma arquitetura de dois ramos para fundir características visuais (imagem) com características geométricas (pontos faciais). O projeto foi refatorado para utilizar o framework **CosFace** como função de perda e integra a biblioteca **UniFace** para detecção robusta de faces e extração de landmarks.
 
 ## 🧠 Arquitetura do Modelo
 
-O modelo `LandmarkConditionedModel` combina informações visuais e geométricas:
+A rede neural utiliza uma abordagem de fusão tardia de características (*late fusion*), composta por dois ramos principais:
 
 1.  **Ramo Visual (Backbone):**
-    * Utiliza **ResNet50** (pré-treinada na ImageNet) ou outras arquiteturas (MobileNet, SphereFace).
-    * Entrada: Imagem RGB (112x112).
-    * Saída: Embedding Visual (512d).
+    * **Entrada:** Imagem facial alinhada (112x112 RGB).
+    * **Modelo:** ResNet50 (pré-treinada na ImageNet) ou MobileNetV3.
+    * **Saída:** Vetor de *embedding* visual (512 dimensões).
 
-2.  **Ramo de Landmarks:**
-    * Utiliza um **Encoder MLP** (Multi-Layer Perceptron) personalizado.
-    * Entrada: Coordenadas normalizadas (x, y) de 5 pontos faciais extraídos pelo **Uniface (RetinaFace/SCRFD)**.
-    * Saída: Embedding Geométrico (128d).
+2.  **Ramo Geométrico (Landmark Encoder):**
+    * **Entrada:** Coordenadas normalizadas de 5 landmarks faciais (olho esquerdo, olho direito, nariz, boca esquerda, boca direita).
+    * **Modelo:** MLP (Multi-Layer Perceptron) com camadas Lineares, BatchNorm e PReLU.
+    * **Saída:** Vetor de *embedding* geométrico (128 dimensões).
 
-3.  **Fusão (Feature Fusion):**
-    * Concatena os vetores visual e geométrico.
-    * Passa por camadas lineares e de normalização (BatchNorm1d + PReLU) para projetar no espaço final de 512 dimensões.
+3.  **Módulo de Fusão:**
+    * Concatena os vetores visual (512d) e geométrico (128d).
+    * Passa por uma camada densa para projetar o resultado final num espaço de 512 dimensões.
 
-## 🛠️ Pré-requisitos e Instalação
+**Função de Perda:**
+* Utiliza **Margin Cosine Product (MCP/CosFace)** para maximizar a separação inter-classes e minimizar a variação intra-classe.
 
-O projeto requer um ambiente com suporte a GPU e bibliotecas específicas para evitar conflitos de versão.
+---
 
-**Dependências Principais:**
-* Python 3.10+
-* PyTorch (com suporte a CUDA)
-* `uniface` (Versão 1.1.2 ou superior)
-* `onnxruntime-gpu`
+## 🛠️ Requisitos e Instalação
 
-**Instalação:**
+O projeto requer um ambiente Python 3.10+ e bibliotecas específicas para evitar conflitos de GPU entre PyTorch e ONNX Runtime.
+
+### Dependências Principais
+* PyTorch >= 2.0 (com suporte CUDA)
+* UniFace >= 1.1.2 (para detecção via SCRFD/RetinaFace)
+* ONNX Runtime GPU
+
+### Instalação
 
 ```bash
-# 1. Instalar dependências básicas
-pip install -r requirements.txt
+# 1. Clone o repositório
+git clone <url-do-repositorio>
+cd Cosface_Refactor
 
-# 2. Instalar versão específica do Uniface (Crítico para compatibilidade de retorno)
-pip install uniface==1.1.2
-
-# 3. Garantir ONNX Runtime GPU (para extração rápida de landmarks)
+# 2. Instale as dependências (ordem recomendada para evitar conflitos)
+pip install torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
 pip install onnxruntime-gpu
-
-bash```
-
-
-🚀 Como Usar
-
-Devido a conflitos de alocação de memória e drivers CUDA entre o PyTorch (treino) e o ONNX Runtime (detecção de faces), o processo foi dividido em dois scripts sequenciais.
-Passo 1: Preparação de Dados (Extração de Landmarks)
-
-Este script roda isolado, sem carregar o PyTorch, permitindo que o uniface use a GPU livremente para detectar faces e extrair landmarks.
-Bash
-
-python prepare_data.py \
-    --root path/to/dataset/train \
-    --dataset-fraction 0.3 \
-    --cache-dir landmark_cache
-
-    --dataset-fraction: Define a porcentagem do dataset a ser processada (ex: 0.3 para 30%). Útil para Sanity Checks rápidos.
-
-    Saída: Gera um arquivo JSON em landmark_cache/ contendo as coordenadas normalizadas.
-
-Passo 2: Treinamento
-
-O script de treino carrega o cache gerado e inicia o treinamento da rede neural.
-Bash
-
-python train.py \
-    --root path/to/dataset/train \
-    --database VggFace2 \
-    --network resnet50 \
-    --classifier MCP \
-    --use-landmarks \
-    --landmark-cache-dir landmark_cache \
-    --dataset-fraction 0.3 \
-    --epochs 25 \
-    --batch-size 32 \
-    --lr 0.001 \
-    --save-path weights/resnet50_landmark
-
-Argumentos Importantes:
-
-    --use-landmarks: Ativa a arquitetura de dois ramos e o carregamento do JSON.
-
-    --dataset-fraction: Deve corresponder à fração usada na preparação.
-
-    --classifier: Função de perda (ex: MCP para Margin Cosine Product / CosFace).
-
-    --lr: Taxa de aprendizado (Recomendado 0.001 para ResNet50 pré-treinada).
-
-📊 Estrutura de Arquivos
-
-    models/landmark_conditioned.py: Definição da arquitetura de fusão e encoders.
-
-    utils/landmark_annotator.py: Lógica robusta de extração usando Uniface v1.1.2 com fallback de erros.
-
-    prepare_data.py: Script isolado para geração de cache de landmarks.
-
-    train.py: Script principal de treinamento com suporte a argumentos de landmarks.
-
-📝 Notas sobre Resultados
-
-    Loss Function: O uso de CosFace (MCP) com margem 0.40 exige um ajuste fino do Learning Rate.
-
-    Comportamento Inicial: É esperado que a acurácia comece baixa e a Loss alta (~20+) nas primeiras épocas devido ao "Cold Start" da camada de fusão, que é inicializada aleatoriamente e precisa se alinhar com o backbone pré-treinado.
+pip install uniface==1.1.2
+pip install -r requirements.txt
+'''
