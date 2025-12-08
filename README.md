@@ -82,28 +82,18 @@ python train.py \
     --save-path weights/resnet50_run1
 ```
 
-   **Argumentos Importantes (train.py)**
-
-```
-Argumento	Descrição
---use-landmarks	Ativa a arquitetura de dois ramos (Visual + Landmarks).
---network	Define o backbone visual (ex: resnet50, mobilenetv3_large).
---dataset-fraction	Define a % do dataset a ser usada (deve corresponder ao cache gerado).
---lr	Taxa de aprendizado inicial (recomendado 0.05 a 0.001 dependendo do batch).
-```
-
 ## 📁 Estrutura do Projeto
 
 ```
-Cosface_Refactor/
+Landmarks_Cosface/
 ├── models/
-│   ├── landmark_conditioned.py  # Arquitetura de fusão (Encoder + Fusion)
+│   ├── Implementação_Landmarks.py  # Arquitetura de fusão (Encoder + Fusion)
 │   ├── resnet.py                # Backbone ResNet50 customizado
 │   └── ...
 ├── utils/
-│   ├── landmark_annotator.py    # Wrapper robusto para o UniFace/SCRFD
+│   ├── Classificador.py    # Wrapper robusto para o UniFace/SCRFD
 │   ├── dataset.py               # ImageFolder modificado para carregar landmarks
-│   └── metrics.py               # Implementação do CosFace (MCP)
+│   └── validações.py               # Implementação do CosFace (MCP)
 ├── prepare_data.py              # Script de pré-processamento isolado
 ├── train.py                     # Loop principal de treinamento
 └── requirements.txt
