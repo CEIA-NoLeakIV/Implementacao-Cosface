@@ -19,6 +19,33 @@ LOGGER = logging.getLogger()
 LOGGER.addFilter(MainProcessFilter())
 
 
+def add_file_handler(log_file: str):
+    """Adiciona um FileHandler ao LOGGER para persistir logs em disco.
+
+    Se o handler para o mesmo arquivo já existir, não adiciona duplicatas.
+    """
+    if not log_file:
+        return
+
+    # Garantir diretório
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    except Exception:
+        pass
+
+    # Evita adicionar o mesmo handler múltiplas vezes
+    abs_path = os.path.abspath(log_file)
+    for h in LOGGER.handlers:
+        if isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', None) == abs_path:
+            return
+
+    fh = logging.FileHandler(abs_path)
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    fh.setFormatter(formatter)
+    LOGGER.addHandler(fh)
+
+
 
 
 class AverageMeter:

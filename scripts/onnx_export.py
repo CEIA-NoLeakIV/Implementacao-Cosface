@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + '/..'))
 
-from models import (
+from modelos import (
     sphere20,
     sphere36,
     sphere64,

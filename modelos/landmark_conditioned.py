@@ -227,7 +227,7 @@ def create_landmark_conditioned_model(
     Returns:
         LandmarkConditionedModel configurado
     """
-    from models import (
+    from modelos import (
         sphere20, sphere36, sphere64,
         MobileNetV1, MobileNetV2,
         mobilenet_v3_small, mobilenet_v3_large, create_resnet50

@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 import seaborn as sns
 
-from models import (
+from modelos import (
     sphere20,
     sphere36,
     sphere64,
@@ -24,6 +24,12 @@ from models import (
     mobilenet_v3_large,
     create_resnet50
 )
+from modelos.landmark_conditioned import (
+    create_landmark_conditioned_model,
+    load_landmark_conditioned_model,
+    LandmarkConditionedModel
+)
+from utils.landmark_annotator import LandmarkAnnotator
 
 
 def extract_deep_features(model, image, device):
@@ -57,13 +63,18 @@ def extract_deep_features(model, image, device):
     original_image_tensor = original_transform(image).unsqueeze(0).to(device)
     flipped_image_tensor = flipped_transform(image).unsqueeze(0).to(device)
 
-    # Extract features
-    original_features = model(original_image_tensor)
-    flipped_features = model(flipped_image_tensor)
-
-    # Combine and return features
-    combined_features = torch.cat([original_features, flipped_features], dim=1).squeeze()
-    return combined_features
+    # If model expects landmarks (LandmarkConditionedModel), do not apply TTA flipping
+    # Here we assume the caller will handle landmarks and call model accordingly.
+    try:
+        # If model has a forward that accepts only image (visual-only), use it
+        original_features = model(original_image_tensor)
+        flipped_features = model(flipped_image_tensor)
+        combined_features = torch.cat([original_features, flipped_features], dim=1).squeeze()
+        return combined_features
+    except TypeError:
+        # Model likely expects (image, landmarks) and can't be called with single arg.
+        # Let caller handle the landmarks-aware forward.
+        raise
 
 
 def k_fold_split(n=6000, n_folds=10):
@@ -138,9 +149,68 @@ def eval(model, model_path=None, device=None, lfw_root='data/val', results_dir="
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    landmarks_dict = {}
+
+    # If a checkpoint is provided, try to load it. Support landmark-conditioned checkpoints.
     if model_path is not None:
-        state_dict = torch.load(model_path, map_location=device)
-        model.load_state_dict(state_dict)
+        checkpoint = torch.load(model_path, map_location=device)
+
+        # If checkpoint contains training args, inspect whether it used landmarks
+        ck_args = None
+        if isinstance(checkpoint, dict) and 'args' in checkpoint:
+            ck_args = checkpoint['args']
+
+        if ck_args is not None and getattr(ck_args, 'use_landmarks', False):
+            # Build landmark-conditioned model matching the checkpoint
+            network_name = getattr(ck_args, 'network', 'resnet50')
+            landmark_dim = getattr(ck_args, 'landmark_dim', 128)
+            landmark_cache_dir = getattr(ck_args, 'landmark_cache_dir', 'landmark_cache')
+
+            model = load_landmark_conditioned_model(
+                checkpoint_path=model_path,
+                network_name=network_name,
+                device=device,
+                embedding_dim=512,
+                num_landmarks=5,
+                landmark_dim=landmark_dim
+            )
+
+            # Prepare landmarks cache (annotate or load existing)
+            annotator = LandmarkAnnotator(cache_dir=landmark_cache_dir)
+            dataset_name = os.path.basename(lfw_root.rstrip('/'))
+            landmarks_dict = annotator.annotate_dataset(dataset_root=lfw_root, dataset_name=dataset_name, limit_fraction=1.0)
+            print(f"Landmarks loaded for evaluation: {len(landmarks_dict)} entries (cache_dir={landmark_cache_dir})")
+        else:
+            # Regular checkpoint: load state_dict into provided model
+            if isinstance(checkpoint, dict) and 'model' in checkpoint:
+                state_dict = checkpoint['model']
+            else:
+                state_dict = checkpoint
+            # If caller didn't provide a model, create a backbone matching ck_args.network (fallback: resnet50)
+            if model is None:
+                network_name = getattr(ck_args, 'network', 'resnet50') if ck_args is not None else 'resnet50'
+                if network_name == 'resnet50':
+                    model = create_resnet50(embedding_dim=512, pretrained=False)
+                elif network_name == 'sphere20':
+                    model = sphere20(512)
+                elif network_name == 'sphere36':
+                    model = sphere36(512)
+                elif network_name == 'sphere64':
+                    model = sphere64(512)
+                elif network_name == 'mobilenetv1':
+                    model = MobileNetV1(512)
+                elif network_name == 'mobilenetv2':
+                    model = MobileNetV2(512)
+                elif network_name == 'mobilenetv3_small':
+                    model = mobilenet_v3_small(512)
+                elif network_name == 'mobilenetv3_large':
+                    model = mobilenet_v3_large(512)
+                else:
+                    # Default fallback
+                    model = create_resnet50(embedding_dim=512, pretrained=False)
+
+            model.load_state_dict(state_dict)
+
     model.to(device).eval()
 
     root = lfw_root
@@ -198,8 +268,33 @@ def eval(model, model_path=None, device=None, lfw_root='data/val', results_dir="
                     pairs_skipped += 1
                     continue
             # --- Fim da Verificação ---
-            f1 = extract_deep_features(model, img1_pil, device)
-            f2 = extract_deep_features(model, img2_pil, device)
+            # Generate embeddings. If model is LandmarkConditionedModel, supply landmarks.
+            def get_embedding_for_image(img_pil, full_path):
+                # Non-landmark flow: use TTA inside extract_deep_features
+                if isinstance(model, LandmarkConditionedModel):
+                    rel = os.path.relpath(full_path, lfw_root)
+                    lm = landmarks_dict.get(rel)
+                    img_tensor = transforms.Compose([
+                        transforms.Resize((112, 112)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+                    ])(img_pil).unsqueeze(0).to(device)
+
+                    if lm is not None:
+                        # lm is list of [[x,y],...], normalized; convert to tensor (1,5,2)
+                        lm_arr = np.array(lm, dtype=np.float32)
+                        lm_tensor = torch.from_numpy(lm_arr).unsqueeze(0).to(device)
+                        emb = model(img_tensor, lm_tensor)
+                    else:
+                        # Fallback: visual-only embedding
+                        print(f"Aviso: Landmark nao encontrado para {rel}. Usando embedding visual apenas.")
+                        emb = model.get_visual_embedding(img_tensor)
+                    return emb.squeeze()
+                else:
+                    return extract_deep_features(model, img_pil, device)
+
+            f1 = get_embedding_for_image(img1_pil, path1)
+            f2 = get_embedding_for_image(img2_pil, path2)
             distance = f1.dot(f2) / (f1.norm() * f2.norm() + 1e-5)
             predicts.append([path1, path2, distance.item(), is_same])
     
@@ -279,7 +374,7 @@ if __name__ == '__main__':
     LFW_DATASET_PATH = "/home/ubuntu/noleak/face_embeddings/data/raw/lfw"
     
     # 2. Caminho para o checkpoint do modelo treinado
-    CHECKPOINT_PATH = "/home/ubuntu/noleak/face_embeddings/src/models/Cosface_Refactor/weights/ResNet50_CosFace_VGGFace2/resnet50_COS_last.ckpt"
+    CHECKPOINT_PATH = "/home/ubuntu/noleak/face_embeddings/src/models/Landmarks_Cosface/weights/resnet50_fixed/resnet50_MCP_best.ckpt"
     
     # 3. (NOVO) Diretório para salvar os resultados (gráficos, etc.)
     RESULTS_DIR = "evaluation_results"
@@ -301,23 +396,13 @@ if __name__ == '__main__':
         print("Detector de faces pronto.")
     # ---------------------------------------------
 
-    # Carregar o backbone ResNet50 (sem pesos pré-treinados da ImageNet)
-    model = create_resnet50(embedding_dim=512, pretrained=False)
-    
-    print(f"Carregando pesos do checkpoint: {CHECKPOINT_PATH}")
-    
-    # O checkpoint salva um dicionário ('model', 'optimizer', etc.)
-    # Nós carregamos apenas o 'model'
-    ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt['model'])
-
     print(f"Iniciando avaliação no LFW em: {LFW_DATASET_PATH}")
-    
-    # Chamar a função 'eval' com os novos parâmetros
+
+    # Deixe a função eval() carregar o checkpoint (ela lida com modelos condicionados por landmarks)
     accuracy, predictions = eval(
-        model=model, 
-        model_path=None, # Os pesos já estão carregados
-        device=device, 
+        model=None,
+        model_path=CHECKPOINT_PATH,
+        device=device,
         lfw_root=LFW_DATASET_PATH,
         results_dir=RESULTS_DIR,
         verify_faces=VERIFY_FACES_IN_LFW,

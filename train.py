@@ -20,9 +20,10 @@ from utils.general import (
     AverageMeter,
     EarlyStopping,
     LOGGER,
+    add_file_handler,
 )
 
-from models import (
+from modelos import (
     sphere20,
     sphere36,
     sphere64,
@@ -34,7 +35,7 @@ from models import (
 )
 
 # Importação da classe de landmarks
-from models.landmark_conditioned import LandmarkConditionedModel
+from modelos.landmark_conditioned import LandmarkConditionedModel
 from utils.validation_split import create_validation_split
 
 def parse_arguments():
@@ -269,6 +270,13 @@ def main(params):
         model_without_ddp = model
 
     os.makedirs(params.save_path, exist_ok=True)
+    # Configure file logging to persist training logs
+    try:
+        log_filename = os.path.join(params.save_path, f'{params.network}_{params.classifier}.log')
+        add_file_handler(log_filename)
+        LOGGER.info(f'Logging to file: {log_filename}')
+    except Exception as e:
+        LOGGER.info(f'Could not initialize file logging: {e}')
     classification_head = get_classification_head(params.classifier, 512, num_classes).to(device)
 
     # --- DATA AUGMENTATION CORRIGIDO ---
