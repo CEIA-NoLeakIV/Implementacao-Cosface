@@ -26,6 +26,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Treinamento de Modelo de Reconhecimento Facial")
     parser.add_argument('--dataset_path', type=str, required=True, help='Caminho para o diretório do dataset de treino.')
+    parser.add_argument('--align_faces', action='store_true', help='Ativa o alinhamento facial (MTCNN) em tempo real. Lento na primeira época.')
+    args = parser.parse_args()
     args = parser.parse_args()
 
     config = FaceRecognitionConfig()
@@ -33,4 +35,5 @@ if __name__ == '__main__':
         config,
         args.dataset_path,
         resume_training=RESUME_TRAINING
+        align_faces=args.align_faces
     )
