@@ -2,9 +2,10 @@
 import cv2
 import numpy as np
 from skimage.transform import SimilarityTransform
-from mtcnn import MTCNN
+from uniface import RetinaFace  # Importação do UniFace
 
-# Matriz de referência padrão (ArcFace/CosFace)
+# --- Configuração Global ---
+# Matriz de referência (ArcFace/CosFace standard 112x112)
 REFERENCE_LANDMARKS = np.array([
     [38.2946, 51.6963], # Olho esquerdo
     [73.5318, 51.5014], # Olho direito
@@ -13,11 +14,21 @@ REFERENCE_LANDMARKS = np.array([
     [70.7299, 92.2041]  # Canto boca dir
 ], dtype=np.float32)
 
+# Variável global para manter o modelo carregado na memória (evita re-inicializar a cada imagem)
+_detector = None
+
+def get_detector():
+    global _detector
+    if _detector is None:
+        # Inicializa o RetinaFace via ONNX (muito rápido)
+        # O modelo será baixado automaticamente na primeira execução
+        _detector = RetinaFace() 
+    return _detector
+
 def estimate_norm(landmark, image_size=112):
     """Calcula a matriz de transformação para alinhar os olhos."""
     assert landmark.shape == (5, 2)
     
-    # Ajuste de escala baseado no tamanho da imagem
     if image_size % 112 == 0:
         ratio = float(image_size) / 112.0
         diff_x = 0.0
@@ -33,57 +44,49 @@ def estimate_norm(landmark, image_size=112):
     return tform.params[0:2, :]
 
 def align_face(image, landmark, image_size=112):
-    """Aplica a transformação afim na imagem."""
+    """Aplica a transformação geométrica (Warp)."""
     M = estimate_norm(landmark, image_size)
     warped = cv2.warpAffine(image, M, (image_size, image_size), borderValue=0.0)
     return warped
 
-# --- Detetor Global (para não recriar a cada imagem) ---
-_detector = None
-
-def get_detector():
-    global _detector
-    if _detector is None:
-        _detector = MTCNN(min_face_size=20)
-    return _detector
-
 def process_image_pipeline(image_np):
     """
-    Recebe imagem (numpy), detecta rosto, alinha e retorna.
-    Se falhar, faz resize simples (fallback).
+    Função principal chamada pelo TensorFlow.
+    1. Converte RGB -> BGR
+    2. Detecta Face (UniFace)
+    3. Alinha
+    4. Retorna
     """
-    # Garantir uint8
+    # Converter para uint8 (formato de imagem padrão)
     if image_np.dtype != np.uint8:
         image_uint8 = image_np.astype(np.uint8)
     else:
         image_uint8 = image_np
 
+    # O TensorFlow carrega em RGB, mas o UniFace/OpenCV espera BGR
+    image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
+
     detector = get_detector()
     
     try:
-        # Detecção
-        results = detector.detect_faces(image_uint8)
+        # Detecta faces
+        # O UniFace retorna uma lista de dicionários: [{'bbox':..., 'landmarks':...}]
+        faces = detector.detect(image_bgr)
         
-        if results:
-            # Pega o rosto com maior confiança
-            best_face = results[0]
-            keypoints = best_face['keypoints']
+        if len(faces) > 0:
+            # Pega a face com maior confiança (geralmente a primeira da lista)
+            best_face = faces[0]
+            landmarks = np.array(best_face['landmarks'], dtype=np.float32)
             
-            # Formata landmarks na ordem correta
-            landmarks = np.array([
-                keypoints['left_eye'],
-                keypoints['right_eye'],
-                keypoints['nose'],
-                keypoints['mouth_left'],
-                keypoints['mouth_right']
-            ], dtype=np.float32)
-            
-            # Alinha
+            # Alinha usando a imagem original (pode ser em RGB ou BGR, vamos manter RGB para o TF)
+            # Como 'align_face' usa warpAffine, não importa a cor, apenas a geometria
             aligned = align_face(image_uint8, landmarks, image_size=112)
+            
             return aligned.astype(np.float32)
             
     except Exception as e:
-        print(f"Erro no alinhamento: {e}")
+        # Em caso de erro, imprime mas não quebra o treino
+        print(f"[Aviso] Erro no UniFace: {e}")
 
-    # Fallback: Resize simples se não achar rosto
-    return cv2.resize(image_uint8, (112, 112)).astype(np.float32)
+    # Fallback: Se não detectou nada, retorna array de zeros (será filtrado no loader)
+    return np.zeros((112, 112, 3), dtype=np.float32)
