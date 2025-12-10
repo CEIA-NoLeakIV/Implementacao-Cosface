@@ -7,3 +7,6 @@ scikit-learn
 pandas
 joblib
 seaborn
+uniface>=1.1.2
+onnxruntime-gpu>=1.16.0
+opencv-python>=4.8.0
