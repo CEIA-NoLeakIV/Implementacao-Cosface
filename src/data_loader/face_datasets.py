@@ -2,7 +2,6 @@
 import os
 import tensorflow as tf
 from tensorflow.keras import layers
-# Importamos a função que criamos acima
 from src.utils.face_processing import process_image_pipeline
 
 data_augmentation = tf.keras.Sequential([
@@ -19,8 +18,6 @@ def get_train_val_datasets(path, image_size, batch_size, validation_split=0.1, a
     if not os.path.exists(path):
         raise FileNotFoundError(f"Dataset não encontrado: {path}")
 
-    # 1. Carregar Dataset (usando estrutura de pastas padrão)
-    # Nota: image_size aqui é inicial, o alinhamento corrigirá depois
     train_ds = tf.keras.utils.image_dataset_from_directory(
         path, validation_split=validation_split, subset="training", 
         seed=123, image_size=(image_size, image_size), batch_size=batch_size, label_mode='categorical'
@@ -36,7 +33,6 @@ def get_train_val_datasets(path, image_size, batch_size, validation_split=0.1, a
 
     # 2. Wrapper para o TensorFlow chamar o Python/OpenCV
     def tf_align_wrapper(image, label):
-        # A mágica acontece aqui: tf.numpy_function executa código python arbitrário
         aligned_img = tf.numpy_function(
             func=process_image_pipeline,
             inp=[image],
