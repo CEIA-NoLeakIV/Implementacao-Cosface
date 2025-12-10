@@ -71,6 +71,9 @@ if __name__ == "__main__":
         print(f"Acurácia: {results['accuracy']:.4f}")
         print(f"AUC:      {results['auc']:.4f}")
         print(f"Threshold:{results['threshold']:.4f}")
+        print(f"Precision: {results['precision']:.4f}")
+        print(f"Recall:    {results['recall']:.4f}")
+        print(f"F1-Score:  {results['f1']:.4f}")
         print(f"Logs salvos em: {args.output_dir}")
 
     except Exception as e:
