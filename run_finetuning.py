@@ -367,34 +367,106 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
     
     # Carregar dataset
     print(f"\nCarregando dataset de: {dataset_path}")
-    train_dataset, val_dataset, num_classes = get_train_val_datasets(
-        dataset_path,
-        config.image_size,
-        config.batch_size,
-        validation_split=0.1,
-        align_faces=False  # Não usar alinhamento no treino, será aplicado apenas na validação
-    )
-    config.update_num_classes(num_classes)
-    print(f"Número de classes no novo dataset: {config.num_classes}")
     
-    # Aplicar RetinaFace na validação se habilitado
-    if use_retinaface:
-        print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
-        val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
-            dataset_path,
-            validation_split=0.1,
-            subset="validation",
+    # Verificar se existem diretórios train e val separados
+    train_path = os.path.join(dataset_path, "train")
+    val_path = os.path.join(dataset_path, "val")
+    
+    if os.path.exists(train_path) and os.path.exists(val_path):
+        print("Diretórios 'train' e 'val' encontrados. Carregando de diretórios separados...")
+        
+        # Carregar dataset de treino do diretório train
+        train_dataset_raw = tf.keras.utils.image_dataset_from_directory(
+            train_path,
             seed=123,
             image_size=(config.image_size, config.image_size),
-            batch_size=None,  # Sem batch para processar individualmente
+            batch_size=config.batch_size,
             label_mode='categorical'
         )
         
-        # Aplicar RetinaFace na validação para excluir amostras sem detecção de rosto
-        val_dataset = apply_retinaface_validation_filter(val_dataset_raw, config.batch_size)
+        # Carregar dataset de validação do diretório val
+        val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
+            val_path,
+            seed=123,
+            image_size=(config.image_size, config.image_size),
+            batch_size=config.batch_size,
+            label_mode='categorical'
+        )
+        
+        # Capturar número de classes do dataset de treino
+        num_classes = len(train_dataset_raw.class_names)
+        
+        # Aplicar transformações ao dataset de treino
+        data_augmentation = tf.keras.Sequential([
+            tf.keras.layers.RandomFlip("horizontal"),
+            tf.keras.layers.RandomRotation(0.05),
+            tf.keras.layers.RandomZoom(0.1),
+        ])
+        
+        train_dataset = train_dataset_raw.map(
+            lambda x, y: (data_augmentation(x, training=True), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        train_dataset = train_dataset.map(
+            lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+        
+        # Aplicar RetinaFace na validação se habilitado
+        if use_retinaface:
+            print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
+            val_dataset_raw_no_batch = tf.keras.utils.image_dataset_from_directory(
+                val_path,
+                seed=123,
+                image_size=(config.image_size, config.image_size),
+                batch_size=None,  # Sem batch para processar individualmente
+                label_mode='categorical'
+            )
+            
+            # Aplicar RetinaFace na validação para excluir amostras sem detecção de rosto
+            val_dataset = apply_retinaface_validation_filter(val_dataset_raw_no_batch, config.batch_size)
+        else:
+            print("\nRetinaFace desabilitado. Usando dataset de validação padrão.")
+            # Aplicar apenas pré-processamento ResNet na validação
+            val_dataset = val_dataset_raw.map(
+                lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+            val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
+        
     else:
-        print("\nRetinaFace desabilitado. Usando dataset de validação padrão.")
-        # val_dataset já foi carregado acima sem filtro
+        # Comportamento original: usar validation_split
+        print("Diretórios 'train' e 'val' não encontrados. Usando validation_split=0.1...")
+        train_dataset, val_dataset, num_classes = get_train_val_datasets(
+            dataset_path,
+            config.image_size,
+            config.batch_size,
+            validation_split=0.1,
+            align_faces=False  # Não usar alinhamento no treino, será aplicado apenas na validação
+        )
+        
+        # Aplicar RetinaFace na validação se habilitado
+        if use_retinaface:
+            print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
+            val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
+                dataset_path,
+                validation_split=0.1,
+                subset="validation",
+                seed=123,
+                image_size=(config.image_size, config.image_size),
+                batch_size=None,  # Sem batch para processar individualmente
+                label_mode='categorical'
+            )
+            
+            # Aplicar RetinaFace na validação para excluir amostras sem detecção de rosto
+            val_dataset = apply_retinaface_validation_filter(val_dataset_raw, config.batch_size)
+        else:
+            print("\nRetinaFace desabilitado. Usando dataset de validação padrão.")
+            # val_dataset já foi carregado acima sem filtro
+    
+    config.update_num_classes(num_classes)
+    print(f"Número de classes no novo dataset: {config.num_classes}")
     
     # Carregar modelo pré-treinado
     pretrained_model = load_pretrained_model(pretrained_model_path, config)
