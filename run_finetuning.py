@@ -11,6 +11,7 @@ import os
 import argparse
 import tensorflow as tf
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, EarlyStopping
@@ -389,6 +390,118 @@ def _ensure_image_size_tuple(image_size):
         return image_size
 
 
+def load_validation_from_mapping(mapping_csv_path, dataset_base_path, image_size, batch_size, class_names):
+    """
+    Carrega dataset de validação a partir do arquivo mapping_val.csv.
+    
+    Args:
+        mapping_csv_path: Caminho para o arquivo mapping_val.csv
+        dataset_base_path: Caminho base do dataset (para resolver caminhos relativos)
+        image_size: Tamanho da imagem (height, width)
+        batch_size: Tamanho do batch
+        class_names: Lista de nomes de classes (ids) para mapear labels
+        
+    Returns:
+        Dataset de validação formatado para o modelo CosFace
+    """
+    print(f"\nCarregando validação do arquivo: {mapping_csv_path}")
+    
+    # Carregar CSV
+    df = pd.read_csv(mapping_csv_path)
+    
+    # Filtrar apenas split='val'
+    df_val = df[df['split'] == 'val'].copy()
+    
+    if len(df_val) == 0:
+        raise ValueError(f"Nenhuma amostra de validação encontrada no arquivo {mapping_csv_path}")
+    
+    print(f"Total de amostras de validação: {len(df_val)}")
+    
+    # Criar mapeamento de id para índice numérico
+    unique_ids = sorted(df_val['id'].unique())
+    id_to_index = {id_name: idx for idx, id_name in enumerate(unique_ids)}
+    
+    # Se class_names foi fornecido, verificar compatibilidade
+    if class_names is not None:
+        # Garantir que todos os ids do val estão em class_names
+        missing_ids = set(unique_ids) - set(class_names)
+        if missing_ids:
+            print(f"Aviso: {len(missing_ids)} IDs de validação não estão em class_names. Adicionando...")
+            # Adicionar IDs faltantes ao final
+            for id_name in sorted(missing_ids):
+                if id_name not in class_names:
+                    class_names.append(id_name)
+        
+        # Atualizar mapeamento baseado em class_names
+        id_to_index = {id_name: idx for idx, id_name in enumerate(class_names)}
+    
+    # Preparar listas de caminhos e labels
+    image_paths = []
+    labels = []
+    
+    for _, row in df_val.iterrows():
+        image_path = row['caminho_imagem']
+        id_name = row['id']
+        
+        # Resolver caminho absoluto se necessário
+        if not os.path.isabs(image_path):
+            image_path = os.path.join(dataset_base_path, image_path)
+        elif not image_path.startswith(dataset_base_path):
+            # Se o caminho absoluto não está dentro do dataset_base_path, tentar usar como está
+            pass
+        
+        # Verificar se arquivo existe
+        if os.path.exists(image_path):
+            image_paths.append(image_path)
+            labels.append(id_to_index[id_name])
+        else:
+            print(f"Aviso: Arquivo não encontrado: {image_path}")
+    
+    if len(image_paths) == 0:
+        raise ValueError(f"Nenhuma imagem válida encontrada no mapping_val.csv")
+    
+    print(f"Imagens válidas carregadas: {len(image_paths)}")
+    print(f"Número de classes únicas na validação: {len(unique_ids)}")
+    
+    # Criar dataset TensorFlow
+    def load_image(path, label):
+        """Carrega e processa uma imagem."""
+        image = tf.io.read_file(path)
+        image = tf.image.decode_jpeg(image, channels=3)
+        image = tf.image.resize(image, image_size)
+        image = tf.cast(image, tf.float32)
+        return image, label
+    
+    # Criar dataset a partir das listas
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths, labels))
+    dataset = dataset.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    
+    # Converter labels para one-hot encoding
+    num_classes = len(class_names) if class_names is not None else len(unique_ids)
+    dataset = dataset.map(
+        lambda x, y: (x, tf.one_hot(y, depth=num_classes)),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Pré-processamento ResNet
+    dataset = dataset.map(
+        lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Transformar para formato esperado pelo modelo CosFace: ([image, label], label)
+    dataset = dataset.map(
+        lambda x, y: ((x, y), y),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Batch e prefetch
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    
+    return dataset, num_classes
+
+
 def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, epochs=30, 
                    num_layers=10, batch_size=64, learning_rate=None, use_retinaface=False):
     """
@@ -435,6 +548,10 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
     if os.path.exists(train_path) and os.path.exists(val_path):
         print("Diretórios 'train' e 'val' encontrados. Carregando de diretórios separados...")
         
+        # Verificar se existe mapping_val.csv
+        mapping_val_path = os.path.join(dataset_path, "mapping_val.csv")
+        use_mapping = os.path.exists(mapping_val_path)
+        
         # Garantir que image_size seja uma tupla de 2 elementos
         image_size_tuple = _ensure_image_size_tuple(config.image_size)
         
@@ -447,17 +564,32 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
             label_mode='categorical'
         )
         
-        # Carregar dataset de validação do diretório val
-        val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
-            val_path,
-            seed=123,
-            image_size=image_size_tuple,
-            batch_size=config.batch_size,
-            label_mode='categorical'
-        )
-        
-        # Capturar número de classes do dataset de treino
+        # Capturar número de classes e nomes do dataset de treino
         num_classes = len(train_dataset_raw.class_names)
+        class_names = train_dataset_raw.class_names
+        
+        # Carregar dataset de validação
+        if use_mapping:
+            print(f"Arquivo mapping_val.csv encontrado. Usando mapeamento para validação...")
+            val_dataset, num_classes_val = load_validation_from_mapping(
+                mapping_val_path,
+                dataset_path,
+                image_size_tuple,
+                config.batch_size,
+                class_names
+            )
+            # Garantir que num_classes seja o máximo entre train e val
+            num_classes = max(num_classes, num_classes_val)
+        else:
+            print("Arquivo mapping_val.csv não encontrado. Usando carregamento padrão do diretório val...")
+            # Carregar dataset de validação do diretório val
+            val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
+                val_path,
+                seed=123,
+                image_size=image_size_tuple,
+                batch_size=config.batch_size,
+                label_mode='categorical'
+            )
         
         # Aplicar transformações ao dataset de treino
         data_augmentation = tf.keras.Sequential([
@@ -481,8 +613,8 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
         )
         train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
         
-        # Aplicar RetinaFace na validação se habilitado
-        if use_retinaface:
+        # Aplicar RetinaFace na validação se habilitado (apenas se não usou mapping)
+        if use_retinaface and not use_mapping:
             print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
             val_dataset_raw_no_batch = tf.keras.utils.image_dataset_from_directory(
                 val_path,
@@ -494,7 +626,7 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
             
             # Aplicar RetinaFace na validação para excluir amostras sem detecção de rosto
             val_dataset = apply_retinaface_validation_filter(val_dataset_raw_no_batch, config.batch_size)
-        else:
+        elif not use_mapping:
             print("\nRetinaFace desabilitado. Usando dataset de validação padrão.")
             # Aplicar apenas pré-processamento ResNet na validação
             val_dataset = val_dataset_raw.map(
@@ -507,6 +639,8 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
                 num_parallel_calls=tf.data.AUTOTUNE
             )
             val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
+        elif use_retinaface and use_mapping:
+            print("\nAviso: RetinaFace não é compatível com mapping_val.csv. Usando validação do mapping sem RetinaFace.")
         
     else:
         # Comportamento original: usar validation_split
