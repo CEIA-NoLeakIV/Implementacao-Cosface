@@ -49,6 +49,47 @@ def load_pretrained_model(model_path, config):
     return model
 
 
+def get_backbone_layers(model):
+    """
+    Identifica as camadas do backbone ResNet50 no modelo.
+    Tenta primeiro encontrar a camada wrapper 'resnet50_backbone'.
+    Se não existir, identifica as camadas individuais até 'global_pool'.
+    """
+    # Tentar primeiro encontrar a camada wrapper
+    try:
+        backbone_wrapper = model.get_layer("resnet50_backbone")
+        # Se encontrou, retornar todas as camadas do wrapper
+        return [layer.name for layer in backbone_wrapper.layers]
+    except (ValueError, AttributeError):
+        # Se não encontrou, identificar camadas individuais
+        backbone_layer_names = []
+        for layer in model.layers:
+            layer_name = layer.name
+            # Incluir todas as camadas até global_pool (que marca o fim do backbone)
+            if layer_name == 'global_pool':
+                break
+            # Excluir label_input que é um input separado
+            if layer_name != 'label_input':
+                backbone_layer_names.append(layer_name)
+        
+        return backbone_layer_names
+
+
+def get_backbone_layer_objects(model):
+    """
+    Retorna uma lista com os objetos das camadas do backbone.
+    Tenta primeiro usar a camada wrapper, senão usa as camadas individuais.
+    """
+    # Tentar primeiro encontrar a camada wrapper
+    try:
+        backbone_wrapper = model.get_layer("resnet50_backbone")
+        return backbone_wrapper.layers
+    except (ValueError, AttributeError):
+        # Se não encontrou, usar camadas individuais
+        backbone_names = get_backbone_layers(model)
+        return [model.get_layer(name) for name in backbone_names]
+
+
 def strategy_1_full_finetuning(model, config, train_dataset, val_dataset, output_dir, epochs):
     """
     Estratégia 1: Fine-tuning Completo
@@ -59,9 +100,10 @@ def strategy_1_full_finetuning(model, config, train_dataset, val_dataset, output
     print("="*60)
     print("Todas as camadas do backbone e da cabeça serão treinadas.")
     
-    # Tornar todas as camadas treináveis
-    backbone = model.get_layer("resnet50_backbone")
-    backbone.trainable = True
+    # Identificar e tornar todas as camadas do backbone treináveis
+    backbone_layers = get_backbone_layer_objects(model)
+    for layer in backbone_layers:
+        layer.trainable = True
     
     # Configurar otimizador com learning rate menor para fine-tuning
     optimizer = Adam(learning_rate=config.learning_rate * 0.1)  # LR 10x menor que o treinamento inicial
@@ -87,18 +129,18 @@ def strategy_2_partial_finetuning(model, config, train_dataset, val_dataset, out
     print("="*60)
     print(f"Apenas as últimas {num_layers} camadas do backbone serão treinadas.")
     
-    backbone = model.get_layer("resnet50_backbone")
-    
-    # Tornar apenas as últimas N camadas treináveis
-    total_layers = len(backbone.layers)
+    # Identificar camadas do backbone
+    backbone_layers = get_backbone_layer_objects(model)
+    total_layers = len(backbone_layers)
     trainable_start = max(0, total_layers - num_layers)
     
-    # Congelar todas as camadas primeiro
-    backbone.trainable = False
+    # Congelar todas as camadas do backbone primeiro
+    for layer in backbone_layers:
+        layer.trainable = False
     
     # Descongelar apenas as últimas N camadas
     for i in range(trainable_start, total_layers):
-        backbone.layers[i].trainable = True
+        backbone_layers[i].trainable = True
     
     # A cabeça sempre é treinável
     for layer in model.layers:
@@ -116,7 +158,7 @@ def strategy_2_partial_finetuning(model, config, train_dataset, val_dataset, out
     trainable_count = sum([1 for layer in model.layers if layer.trainable])
     print(f"Learning rate inicial: {optimizer.learning_rate.numpy():.6f}")
     print(f"Total de camadas treináveis: {trainable_count}")
-    print(f"Camadas do backbone treináveis: {num_layers}/{total_layers}")
+    print(f"Camadas do backbone treináveis: {num_layers}/{total_layers} (últimas {num_layers} de {total_layers})")
     
     return model, optimizer
 
@@ -133,8 +175,10 @@ def strategy_3_differential_lr_finetuning(model, config, train_dataset, val_data
     print("Camadas profundas: LR baixo")
     print("Camadas superficiais: LR alto")
     
-    backbone = model.get_layer("resnet50_backbone")
-    backbone.trainable = True
+    # Identificar camadas do backbone
+    backbone_layers = get_backbone_layer_objects(model)
+    for layer in backbone_layers:
+        layer.trainable = True
     
     # Definir learning rates diferenciados
     # Camadas profundas (início): LR muito baixo
@@ -142,7 +186,7 @@ def strategy_3_differential_lr_finetuning(model, config, train_dataset, val_data
     # Camadas superficiais (fim): LR mais alto
     # Cabeça: LR mais alto ainda
     
-    total_layers = len(backbone.layers)
+    total_layers = len(backbone_layers)
     deep_layers = total_layers // 3
     mid_layers = total_layers // 3
     shallow_layers = total_layers - deep_layers - mid_layers
@@ -491,12 +535,31 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
     if cosface_layer.n_classes != config.num_classes:
         print(f"\nAjustando número de classes de {cosface_layer.n_classes} para {config.num_classes}")
         # Criar novo modelo com número correto de classes
-        model, feature_extractor, backbone = create_resnet50_cosface(config)
+        model, feature_extractor, new_backbone = create_resnet50_cosface(config)
         # Transferir pesos do backbone do modelo pré-treinado
         try:
-            pretrained_backbone = pretrained_model.get_layer("resnet50_backbone")
-            backbone.set_weights(pretrained_backbone.get_weights())
-            print("Pesos do backbone transferidos com sucesso.")
+            # Tentar obter backbone wrapper do modelo pré-treinado
+            try:
+                pretrained_backbone = pretrained_model.get_layer("resnet50_backbone")
+                # Se encontrou wrapper, transferir pesos diretamente
+                new_backbone.set_weights(pretrained_backbone.get_weights())
+                print("Pesos do backbone transferidos com sucesso (via wrapper).")
+            except (ValueError, AttributeError):
+                # Se não encontrou wrapper, transferir camada por camada
+                pretrained_backbone_layers = get_backbone_layer_objects(pretrained_model)
+                new_backbone_layers = new_backbone.layers
+                
+                # Transferir pesos camada por camada
+                transferred_count = 0
+                for pretrained_layer, new_layer in zip(pretrained_backbone_layers, new_backbone_layers):
+                    try:
+                        if pretrained_layer.get_weights() and len(pretrained_layer.get_weights()) > 0:
+                            new_layer.set_weights(pretrained_layer.get_weights())
+                            transferred_count += 1
+                    except Exception as e:
+                        print(f"  Aviso: Não foi possível transferir pesos de {pretrained_layer.name}: {e}")
+                
+                print(f"Pesos do backbone transferidos com sucesso ({transferred_count}/{len(pretrained_backbone_layers)} camadas).")
             
             # Tentar transferir pesos da camada de embedding (se compatível)
             try:
