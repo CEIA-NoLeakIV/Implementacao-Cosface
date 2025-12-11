@@ -299,6 +299,12 @@ def apply_retinaface_validation_filter(val_dataset_raw, batch_size):
         num_parallel_calls=tf.data.AUTOTUNE
     )
     
+    # Transformar para formato esperado pelo modelo CosFace: ([image, label], label)
+    val_dataset_final = val_dataset_final.map(
+        lambda x, y: ((x, y), y),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
     # Re-batching após filtro (pode ter batches menores)
     val_dataset_final = val_dataset_final.batch(batch_size)
     val_dataset_final = val_dataset_final.prefetch(tf.data.AUTOTUNE)
@@ -468,6 +474,11 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
             lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
             num_parallel_calls=tf.data.AUTOTUNE
         )
+        # Transformar para formato esperado pelo modelo CosFace: ([image, label], label)
+        train_dataset = train_dataset.map(
+            lambda x, y: ((x, y), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
         train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
         
         # Aplicar RetinaFace na validação se habilitado
@@ -490,6 +501,11 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
                 lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
                 num_parallel_calls=tf.data.AUTOTUNE
             )
+            # Transformar para formato esperado pelo modelo CosFace: ([image, label], label)
+            val_dataset = val_dataset.map(
+                lambda x, y: ((x, y), y),
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
             val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
         
     else:
@@ -501,6 +517,16 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
             config.batch_size,
             validation_split=0.1,
             align_faces=False  # Não usar alinhamento no treino, será aplicado apenas na validação
+        )
+        
+        # Transformar datasets para formato esperado pelo modelo CosFace: ([image, label], label)
+        train_dataset = train_dataset.map(
+            lambda x, y: ((x, y), y),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        val_dataset = val_dataset.map(
+            lambda x, y: ((x, y), y),
+            num_parallel_calls=tf.data.AUTOTUNE
         )
         
         # Aplicar RetinaFace na validação se habilitado
