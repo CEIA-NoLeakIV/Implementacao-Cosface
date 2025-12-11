@@ -90,3 +90,46 @@ def process_image_pipeline(image_np):
 
     # Fallback: Se não detectou nada, retorna array de zeros (será filtrado no loader)
     return np.zeros((112, 112, 3), dtype=np.float32)
+
+
+def process_image_pipeline_with_detection_flag(image_np):
+    """
+    Função para validação que retorna a imagem alinhada e um flag indicando se detectou face.
+    Usado para excluir amostras sem detecção durante a validação.
+    
+    Returns:
+        tuple: (aligned_image, face_detected_flag)
+        - aligned_image: imagem alinhada (112, 112, 3) ou zeros se não detectou
+        - face_detected_flag: 1.0 se detectou face, 0.0 caso contrário
+    """
+    # Converter para uint8 (formato de imagem padrão)
+    if image_np.dtype != np.uint8:
+        image_uint8 = image_np.astype(np.uint8)
+    else:
+        image_uint8 = image_np
+
+    # O TensorFlow carrega em RGB, mas o UniFace/OpenCV espera BGR
+    image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
+
+    detector = get_detector()
+    
+    try:
+        # Detecta faces
+        faces = detector.detect(image_bgr)
+        
+        if len(faces) > 0:
+            # Pega a face com maior confiança (geralmente a primeira da lista)
+            best_face = faces[0]
+            landmarks = np.array(best_face['landmarks'], dtype=np.float32)
+            
+            # Alinha usando a imagem original
+            aligned = align_face(image_uint8, landmarks, image_size=112)
+            
+            return aligned.astype(np.float32), np.float32(1.0)  # Face detectada
+            
+    except Exception as e:
+        # Em caso de erro, considera como não detectado
+        print(f"[Aviso] Erro no RetinaFace durante validação: {e}")
+
+    # Não detectou face: retorna zeros e flag 0.0
+    return np.zeros((112, 112, 3), dtype=np.float32), np.float32(0.0)

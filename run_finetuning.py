@@ -33,6 +33,7 @@ from src.data_loader.face_datasets import get_train_val_datasets
 from src.backbones.resnet import create_resnet50_cosface
 from src.optimizers.scheduler import CosineAnnealingScheduler
 from src.losses.margin_losses import CosFace
+from src.utils.face_processing import process_image_pipeline_with_detection_flag
 
 
 def load_pretrained_model(model_path, config):
@@ -196,6 +197,74 @@ def strategy_3_differential_lr_finetuning(model, config, train_dataset, val_data
     return model, optimizer
 
 
+def apply_retinaface_validation_filter(val_dataset_raw, batch_size):
+    """
+    Aplica RetinaFace no dataset de validação e exclui amostras onde não detecta rosto.
+    
+    Args:
+        val_dataset_raw: Dataset de validação RAW (sem pré-processamento) do TensorFlow
+        batch_size: Tamanho do batch
+        
+    Returns:
+        Dataset filtrado contendo apenas amostras com face detectada e pré-processado
+    """
+    print("\n" + "="*60)
+    print("APLICANDO RETINAFACE NA VALIDAÇÃO")
+    print("="*60)
+    print("Filtrando amostras sem detecção de rosto...")
+    
+    def tf_align_with_flag(image, label):
+        """Wrapper para processar imagem e retornar flag de detecção."""
+        aligned_img, detection_flag = tf.numpy_function(
+            func=process_image_pipeline_with_detection_flag,
+            inp=[image],
+            Tout=[tf.float32, tf.float32]
+        )
+        # Definir shapes manualmente após numpy_function
+        aligned_img.set_shape((112, 112, 3))
+        detection_flag.set_shape(())
+        return aligned_img, label, detection_flag
+    
+    def filter_by_detection(aligned_img, label, detection_flag):
+        """Filtra amostras baseado no flag de detecção."""
+        # Retorna True se detectou face (flag > 0.5)
+        return tf.greater(detection_flag, 0.5)
+    
+    def remove_flag(aligned_img, label, detection_flag):
+        """Remove o flag do output, mantendo apenas imagem e label."""
+        return aligned_img, label
+    
+    # Aplicar detecção e filtro
+    val_dataset_with_flag = val_dataset_raw.map(
+        tf_align_with_flag,
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Filtrar amostras sem detecção
+    val_dataset_filtered = val_dataset_with_flag.filter(filter_by_detection)
+    
+    # Remover o flag do output
+    val_dataset_final = val_dataset_filtered.map(
+        remove_flag,
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Pré-processamento ResNet (normalização)
+    val_dataset_final = val_dataset_final.map(
+        lambda x, y: (tf.keras.applications.resnet50.preprocess_input(x), y),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    # Re-batching após filtro (pode ter batches menores)
+    val_dataset_final = val_dataset_final.batch(batch_size)
+    val_dataset_final = val_dataset_final.prefetch(tf.data.AUTOTUNE)
+    
+    print("Filtro RetinaFace aplicado com sucesso na validação.")
+    print("Amostras sem detecção de rosto foram excluídas.\n")
+    
+    return val_dataset_final
+
+
 def plot_finetuning_history(log_path, save_path, strategy_name):
     """Plota o histórico de treinamento do fine-tuning."""
     if not os.path.exists(log_path):
@@ -261,7 +330,7 @@ def plot_finetuning_history(log_path, save_path, strategy_name):
 
 
 def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, epochs=30, 
-                   num_layers=10, batch_size=64, learning_rate=None):
+                   num_layers=10, batch_size=64, learning_rate=None, use_retinaface=False):
     """
     Executa o fine-tuning com a estratégia selecionada.
     
@@ -274,6 +343,7 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
         num_layers: número de camadas para estratégia 2
         batch_size: tamanho do batch
         learning_rate: learning rate customizado (opcional)
+        use_retinaface: se True, aplica RetinaFace na validação para excluir amostras sem rosto
     """
     print("\n" + "="*80)
     print("INICIANDO FINE-TUNING PARA FACE RECOGNITION")
@@ -302,10 +372,29 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
         config.image_size,
         config.batch_size,
         validation_split=0.1,
-        fraction=1.0
+        align_faces=False  # Não usar alinhamento no treino, será aplicado apenas na validação
     )
     config.update_num_classes(num_classes)
     print(f"Número de classes no novo dataset: {config.num_classes}")
+    
+    # Aplicar RetinaFace na validação se habilitado
+    if use_retinaface:
+        print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
+        val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
+            dataset_path,
+            validation_split=0.1,
+            subset="validation",
+            seed=123,
+            image_size=(config.image_size, config.image_size),
+            batch_size=None,  # Sem batch para processar individualmente
+            label_mode='categorical'
+        )
+        
+        # Aplicar RetinaFace na validação para excluir amostras sem detecção de rosto
+        val_dataset = apply_retinaface_validation_filter(val_dataset_raw, config.batch_size)
+    else:
+        print("\nRetinaFace desabilitado. Usando dataset de validação padrão.")
+        # val_dataset já foi carregado acima sem filtro
     
     # Carregar modelo pré-treinado
     pretrained_model = load_pretrained_model(pretrained_model_path, config)
@@ -458,6 +547,11 @@ Exemplos de uso:
   python run_finetuning.py --strategy 3 --pretrained_model models/pretrained.keras \\
                            --dataset_path /dados/datasets/aligned_112x112/vggface2_dataset_all_splits_merged/ \\
                            --output_dir experiments/finetuning_strategy3
+
+  # Com RetinaFace habilitado na validação
+  python run_finetuning.py --strategy 1 --pretrained_model models/pretrained.keras \\
+                           --dataset_path /dados/datasets/aligned_112x112/vggface2_dataset_all_splits_merged/ \\
+                           --output_dir experiments/finetuning_strategy1 --use_retinaface
         """
     )
     
@@ -510,6 +604,11 @@ Exemplos de uso:
         default=None,
         help='Learning rate customizado (opcional, default: usa config)'
     )
+    parser.add_argument(
+        '--use_retinaface',
+        action='store_true',
+        help='Habilita RetinaFace na validação para excluir amostras sem detecção de rosto (default: False)'
+    )
     
     args = parser.parse_args()
     
@@ -521,6 +620,7 @@ Exemplos de uso:
         epochs=args.epochs,
         num_layers=args.num_layers,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        use_retinaface=args.use_retinaface
     )
 

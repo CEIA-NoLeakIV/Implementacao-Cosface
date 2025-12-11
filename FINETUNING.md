@@ -7,11 +7,12 @@ Este documento apresenta um guia completo para realizar fine-tuning do modelo de
 1. [Visão Geral](#visão-geral)
 2. [Pré-requisitos](#pré-requisitos)
 3. [Estrutura do Dataset](#estrutura-do-dataset)
-4. [Estratégias de Fine-tuning](#estratégias-de-fine-tuning)
-5. [Passo a Passo](#passo-a-passo)
-6. [Salvamento de Modelos](#salvamento-de-modelos)
-7. [Monitoramento e Avaliação](#monitoramento-e-avaliação)
-8. [Troubleshooting](#troubleshooting)
+4. [RetinaFace na Validação](#retinaface-na-validação)
+5. [Estratégias de Fine-tuning](#estratégias-de-fine-tuning)
+6. [Passo a Passo](#passo-a-passo)
+7. [Salvamento de Modelos](#salvamento-de-modelos)
+8. [Monitoramento e Avaliação](#monitoramento-e-avaliação)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -88,6 +89,93 @@ Certifique-se de que todas as dependências estão instaladas:
 pip install -r requirements.txt
 ```
 
+**Dependências importantes:**
+- TensorFlow/Keras
+- RetinaFace (via `uniface`) - usado automaticamente na validação
+- OpenCV
+- scikit-image
+
+---
+
+## 🔍 RetinaFace na Validação
+
+### Visão Geral
+
+O script oferece a opção de aplicar o **RetinaFace** na fase de validação para garantir que apenas amostras com detecção de rosto sejam utilizadas. Isso melhora a qualidade da validação e evita que imagens sem rosto afetem as métricas.
+
+**⚠️ Importante:** O RetinaFace é **opcional** e deve ser habilitado explicitamente usando a flag `--use_retinaface`.
+
+### Como Funciona
+
+1. **Durante o Treinamento:**
+   - O dataset de treino é processado normalmente, sem filtro de RetinaFace
+   - Isso permite que o modelo aprenda com todos os dados disponíveis
+
+2. **Durante a Validação (quando `--use_retinaface` está habilitado):**
+   - Cada imagem do dataset de validação passa pelo RetinaFace
+   - Se o RetinaFace **não detectar** um rosto, a amostra é **excluída** automaticamente
+   - Apenas amostras com detecção de rosto são usadas para calcular métricas de validação
+
+3. **Quando RetinaFace está desabilitado:**
+   - O dataset de validação é usado normalmente, sem filtro
+   - Todas as amostras são incluídas na validação
+
+### Política de Exclusão
+
+- ✅ **Amostras com rosto detectado**: Incluídas na validação
+- ❌ **Amostras sem rosto detectado**: Excluídas automaticamente
+- ⚠️ **Erros de detecção**: Tratados como "sem detecção" e excluídos
+
+### Benefícios
+
+- **Validação mais precisa**: Apenas imagens válidas são consideradas
+- **Métricas mais confiáveis**: Evita ruído de imagens sem rosto
+- **Processo automático**: Não requer intervenção manual
+- **Apenas na validação**: Não afeta o treinamento
+
+### Como Habilitar
+
+Para habilitar o RetinaFace na validação, adicione a flag `--use_retinaface` ao comando:
+
+```bash
+python run_finetuning.py \
+    --strategy 1 \
+    --pretrained_model models/pretrained.keras \
+    --dataset_path /dados/datasets/... \
+    --output_dir experiments/finetuning_strategy1 \
+    --use_retinaface  # <-- Adicione esta flag
+```
+
+**Sem a flag:** O RetinaFace não é aplicado e todas as amostras de validação são usadas.
+
+### Mensagens Durante a Execução
+
+Quando o RetinaFace está habilitado, você verá mensagens como:
+
+```
+Carregando dataset de validação RAW para aplicar RetinaFace...
+============================================================
+APLICANDO RETINAFACE NA VALIDAÇÃO
+============================================================
+Filtrando amostras sem detecção de rosto...
+Filtro RetinaFace aplicado com sucesso na validação.
+Amostras sem detecção de rosto foram excluídas.
+```
+
+Quando desabilitado:
+```
+RetinaFace desabilitado. Usando dataset de validação padrão.
+```
+
+### Notas Importantes
+
+- ⚠️ O RetinaFace é **opcional** e deve ser habilitado com `--use_retinaface`
+- ⚠️ O RetinaFace é aplicado **apenas na validação**, não no treinamento
+- ⚠️ O processo de filtragem pode reduzir o tamanho do dataset de validação
+- ⚠️ Se muitas amostras forem excluídas, considere revisar a qualidade do dataset
+- ✅ O modelo RetinaFace é carregado uma única vez e reutilizado (eficiente)
+- 💡 **Recomendação**: Use `--use_retinaface` quando o dataset pode conter imagens sem rosto ou de baixa qualidade
+
 ---
 
 ## 🔧 Estratégias de Fine-tuning
@@ -115,7 +203,8 @@ python run_finetuning.py \
     --dataset_path /dados/datasets/aligned_112x112/vggface2_dataset_all_splits_merged/ \
     --output_dir experiments/finetuning_strategy1 \
     --epochs 30 \
-    --batch_size 64
+    --batch_size 64 \
+    --use_retinaface  # Opcional: habilita filtro RetinaFace na validação
 ```
 
 ---
@@ -226,7 +315,8 @@ python run_finetuning.py \
     --output_dir experiments/finetuning_strategy1 \
     --epochs 30 \
     --batch_size 64 \
-    --learning_rate 0.0005
+    --learning_rate 0.0005 \
+    --use_retinaface  # Opcional: habilita filtro RetinaFace na validação
 ```
 
 **Exemplo com Estratégia 2 (recomendado para começar):**
@@ -239,7 +329,8 @@ python run_finetuning.py \
     --output_dir experiments/finetuning_strategy2 \
     --epochs 30 \
     --batch_size 64 \
-    --num_layers 10
+    --num_layers 10 \
+    --use_retinaface  # Opcional: habilita filtro RetinaFace na validação
 ```
 
 ### Passo 5: Monitorar o Progresso
@@ -247,8 +338,9 @@ python run_finetuning.py \
 Durante o treinamento, você verá:
 - Progresso por época
 - Loss e acurácia de treino
-- Loss e acurácia de validação (se disponível)
+- Loss e acurácia de validação (com ou sem filtro RetinaFace, dependendo da flag)
 - Learning rate atual
+- Mensagens sobre aplicação do RetinaFace na validação (se `--use_retinaface` estiver habilitado)
 
 ### Passo 6: Verificar Resultados
 
@@ -357,6 +449,7 @@ O script gera automaticamente:
 - ❌ Overfitting (treino muito melhor que validação)
 - ❌ Acurácia estagnada
 - ❌ Loss com NaN
+- ❌ Muitas amostras excluídas pelo RetinaFace (verifique qualidade do dataset)
 
 ### Validação no LFW (Opcional)
 
@@ -448,6 +541,27 @@ O script ajusta automaticamente o número de classes. Se houver erro:
 3. Adicionar mais dados de treinamento
 4. Usar data augmentation (já incluído no pipeline)
 
+### Problema: "Muitas amostras excluídas pelo RetinaFace"
+
+**Sintomas:**
+- Mensagem indicando muitas exclusões durante a validação
+- Dataset de validação muito pequeno após filtro
+
+**Soluções:**
+1. Verificar qualidade das imagens no dataset:
+   ```bash
+   # Verificar algumas imagens manualmente
+   find /dados/datasets/.../val -name "*.jpg" | head -10 | xargs -I {} open {}
+   ```
+
+2. Verificar se as imagens estão alinhadas corretamente
+3. Considerar pré-processar o dataset antes do fine-tuning
+4. Verificar se o RetinaFace está funcionando corretamente:
+   - Teste com algumas imagens manualmente
+   - Verifique logs de erro do RetinaFace
+
+**Nota:** Algumas exclusões são normais, especialmente se o dataset contém imagens de baixa qualidade ou sem rosto visível.
+
 ---
 
 ## 📈 Recomendações Finais
@@ -473,6 +587,9 @@ O script ajusta automaticamente o número de classes. Se houver erro:
 - ✅ Monitore overfitting
 - ✅ Documente os parâmetros usados
 - ✅ Compare diferentes estratégias no mesmo dataset
+- ✅ Verifique a qualidade do dataset antes do fine-tuning
+- ✅ Monitore quantas amostras são excluídas pelo RetinaFace na validação
+- ✅ Use o filtro RetinaFace para garantir validação com imagens válidas
 
 ---
 
@@ -494,4 +611,16 @@ Para problemas ou dúvidas:
 ---
 
 **Última atualização:** 2024
+
+---
+
+## 🔄 Histórico de Mudanças
+
+### Versão Atual
+
+- ✅ **RetinaFace Opcional na Validação**: Filtro de RetinaFace pode ser habilitado com `--use_retinaface`
+- ✅ **Política de Exclusão**: Amostras sem detecção de rosto são automaticamente excluídas da validação (quando habilitado)
+- ✅ **Processamento Eficiente**: RetinaFace é carregado uma única vez e reutilizado
+- ✅ **Apenas na Validação**: Filtro aplicado apenas na validação, não afeta o treinamento
+- ✅ **Controle Flexível**: Usuário decide quando usar o filtro através da flag `--use_retinaface`
 
