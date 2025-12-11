@@ -329,6 +329,16 @@ def plot_finetuning_history(log_path, save_path, strategy_name):
     print(f"Gráfico salvo em: {figure_path}")
 
 
+def _ensure_image_size_tuple(image_size):
+    """Garante que image_size seja uma tupla de 2 inteiros (height, width)."""
+    if isinstance(image_size, (int, float)):
+        return (int(image_size), int(image_size))
+    elif isinstance(image_size, (tuple, list)) and len(image_size) == 2:
+        return (int(image_size[0]), int(image_size[1]))
+    else:
+        return image_size
+
+
 def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, epochs=30, 
                    num_layers=10, batch_size=64, learning_rate=None, use_retinaface=False):
     """
@@ -375,11 +385,14 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
     if os.path.exists(train_path) and os.path.exists(val_path):
         print("Diretórios 'train' e 'val' encontrados. Carregando de diretórios separados...")
         
+        # Garantir que image_size seja uma tupla de 2 elementos
+        image_size_tuple = _ensure_image_size_tuple(config.image_size)
+        
         # Carregar dataset de treino do diretório train
         train_dataset_raw = tf.keras.utils.image_dataset_from_directory(
             train_path,
             seed=123,
-            image_size=(config.image_size, config.image_size),
+            image_size=image_size_tuple,
             batch_size=config.batch_size,
             label_mode='categorical'
         )
@@ -388,7 +401,7 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
         val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
             val_path,
             seed=123,
-            image_size=(config.image_size, config.image_size),
+            image_size=image_size_tuple,
             batch_size=config.batch_size,
             label_mode='categorical'
         )
@@ -419,7 +432,7 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
             val_dataset_raw_no_batch = tf.keras.utils.image_dataset_from_directory(
                 val_path,
                 seed=123,
-                image_size=(config.image_size, config.image_size),
+                image_size=image_size_tuple,
                 batch_size=None,  # Sem batch para processar individualmente
                 label_mode='categorical'
             )
@@ -449,12 +462,14 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
         # Aplicar RetinaFace na validação se habilitado
         if use_retinaface:
             print("\nCarregando dataset de validação RAW para aplicar RetinaFace...")
+            image_size_tuple = _ensure_image_size_tuple(config.image_size)
+            
             val_dataset_raw = tf.keras.utils.image_dataset_from_directory(
                 dataset_path,
                 validation_split=0.1,
                 subset="validation",
                 seed=123,
-                image_size=(config.image_size, config.image_size),
+                image_size=image_size_tuple,
                 batch_size=None,  # Sem batch para processar individualmente
                 label_mode='categorical'
             )
