@@ -107,7 +107,7 @@ def strategy_1_full_finetuning(model, config, train_dataset, val_dataset, output
         layer.trainable = True
     
     # Configurar otimizador com learning rate menor para fine-tuning
-    optimizer = Adam(learning_rate=config.learning_rate * 0.1)  # LR 10x menor que o treinamento inicial
+    optimizer = Adam(learning_rate=config.learning_rate)  # LR 10x menor que o treinamento inicial
     
     # Compilar modelo
     crossentropy = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
