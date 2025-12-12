@@ -390,7 +390,7 @@ def _ensure_image_size_tuple(image_size):
         return image_size
 
 
-def load_validation_from_mapping(mapping_csv_path, dataset_base_path, image_size, batch_size, class_names):
+def load_validation_from_mapping(mapping_csv_path, dataset_base_path, image_size, batch_size, class_names, use_retinaface=False):
     """
     Carrega dataset de validação a partir do arquivo mapping_val.csv.
     
@@ -400,6 +400,7 @@ def load_validation_from_mapping(mapping_csv_path, dataset_base_path, image_size
         image_size: Tamanho da imagem (height, width)
         batch_size: Tamanho do batch
         class_names: Lista de nomes de classes (ids) para mapear labels
+        use_retinaface: Se True, aplica RetinaFace para filtrar amostras sem detecção de rosto
         
     Returns:
         Dataset de validação formatado para o modelo CosFace
@@ -463,21 +464,66 @@ def load_validation_from_mapping(mapping_csv_path, dataset_base_path, image_size
     print(f"Imagens válidas carregadas: {len(image_paths)}")
     print(f"Número de classes únicas na validação: {len(unique_ids)}")
     
-    # Criar dataset TensorFlow
-    def load_image(path, label):
-        """Carrega e processa uma imagem."""
+    # Converter labels para one-hot encoding (antes de criar dataset)
+    num_classes = len(class_names) if class_names is not None else len(unique_ids)
+    
+    # Criar dataset TensorFlow RAW (sem resize se usar RetinaFace)
+    def load_image_raw(path, label):
+        """Carrega imagem sem redimensionar (para RetinaFace processar original)."""
         image = tf.io.read_file(path)
         image = tf.image.decode_jpeg(image, channels=3)
-        image = tf.image.resize(image, image_size)
         image = tf.cast(image, tf.float32)
         return image, label
     
     # Criar dataset a partir das listas
     dataset = tf.data.Dataset.from_tensor_slices((image_paths, labels))
-    dataset = dataset.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
+    
+    if use_retinaface:
+        print("\nAplicando RetinaFace na validação do mapping...")
+        # Carregar imagens sem resize primeiro (RetinaFace precisa do tamanho original)
+        dataset = dataset.map(load_image_raw, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Aplicar RetinaFace com flag de detecção
+        def tf_align_with_flag(image, label):
+            """Wrapper para processar imagem e retornar flag de detecção."""
+            aligned_img, detection_flag = tf.numpy_function(
+                func=process_image_pipeline_with_detection_flag,
+                inp=[image],
+                Tout=[tf.float32, tf.float32]
+            )
+            # Definir shapes manualmente após numpy_function
+            aligned_img.set_shape((112, 112, 3))
+            detection_flag.set_shape(())
+            return aligned_img, label, detection_flag
+        
+        def filter_by_detection(aligned_img, label, detection_flag):
+            """Filtra amostras baseado no flag de detecção."""
+            # Retorna True se detectou face (flag > 0.5)
+            return tf.greater(detection_flag, 0.5)
+        
+        def remove_flag(aligned_img, label, detection_flag):
+            """Remove o flag do output, mantendo apenas imagem e label."""
+            return aligned_img, label
+        
+        # Aplicar detecção e filtro
+        dataset = dataset.map(tf_align_with_flag, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.filter(filter_by_detection)
+        dataset = dataset.map(remove_flag, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        print("Filtro RetinaFace aplicado. Amostras sem detecção de rosto foram excluídas.")
+    else:
+        # Carregar e redimensionar imagens normalmente
+        def load_image(path, label):
+            """Carrega e processa uma imagem."""
+            image = tf.io.read_file(path)
+            image = tf.image.decode_jpeg(image, channels=3)
+            image = tf.image.resize(image, image_size)
+            image = tf.cast(image, tf.float32)
+            return image, label
+        
+        dataset = dataset.map(load_image, num_parallel_calls=tf.data.AUTOTUNE)
     
     # Converter labels para one-hot encoding
-    num_classes = len(class_names) if class_names is not None else len(unique_ids)
     dataset = dataset.map(
         lambda x, y: (x, tf.one_hot(y, depth=num_classes)),
         num_parallel_calls=tf.data.AUTOTUNE
@@ -576,7 +622,8 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
                 dataset_path,
                 image_size_tuple,
                 config.batch_size,
-                class_names
+                class_names,
+                use_retinaface=use_retinaface
             )
             # Garantir que num_classes seja o máximo entre train e val
             num_classes = max(num_classes, num_classes_val)
@@ -639,8 +686,6 @@ def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, ep
                 num_parallel_calls=tf.data.AUTOTUNE
             )
             val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
-        elif use_retinaface and use_mapping:
-            print("\nAviso: RetinaFace não é compatível com mapping_val.csv. Usando validação do mapping sem RetinaFace.")
         
     else:
         # Comportamento original: usar validation_split
