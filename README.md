@@ -43,10 +43,12 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
      2. **Fine-Tuning Completo:** O backbone é descongelado e o modelo é ajustado em todo o conjunto de dados.
 
 2. **Script de Execução:**
-   - O treinamento é iniciado com o script `run_training.py`.
+   - O treinamento é iniciado com o script `train.py`.
    - Exemplo de comando:
      ```bash
-     python run_training.py --dataset_path /path/to/dataset
+     python train.py \
+     --data /home/ubuntu/noleak/EmbeddingFramework/data/vggface2_HQ_cropado/insightface_aligned_112x112/train
+     --epochs 30 \
      ```
 
 ### Validação
@@ -57,7 +59,11 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
 2. **Script de Execução:**
    - Exemplo de comando:
      ```bash
-     python run_validation.py --model_path /path/to/checkpoint --dataset_path /path/to/validation/dataset
+     python run_validation.py \
+     --model /home/ubuntu/noleak/face_embeddings/src/models/Cosface/experiments/finetuning_full_v1/final_model.keras \
+     --lfw_root /home/ubuntu/noleak/face_embeddings/data/raw/lfw \
+     --pairs /home/ubuntu/noleak/face_embeddings/data/raw/lfw/lfw_ann.txt \
+     --save_dir evaluation_final_report \
      ```
 
 ---
@@ -66,10 +72,6 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
 
 ### Configurações (`config/`)
 - Define hiperparâmetros como taxa de aprendizado, número de épocas, e caminhos para datasets e checkpoints.
-
-### Pipelines (`src/pipelines/`)
-- **`training_pipeline.py`:** Gerencia o treinamento do modelo.
-- **`inference_pipeline.py`:** Gerencia a inferência em novos dados.
 
 ### Modelos (`src/backbones/`, `src/model_builder/`)
 - **`backbones/`:** Contém arquiteturas de redes neurais, como ResNet50.
@@ -91,7 +93,7 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
 
 ## Scripts de Execução
 
-### `run_training.py`
+### `train.py`
 - Inicia o treinamento do modelo.
 - Permite especificar o dataset via linha de comando.
 
@@ -113,7 +115,7 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
 
 1. **Treinar um Modelo:**
    ```bash
-   python run_training.py --dataset_path /path/to/dataset
+   python train.py --dataset_path /path/to/dataset
    ```
 ```markdown
 # Cosface — Framework de Treino, Finetuning e Validação
@@ -152,7 +154,7 @@ Principais bibliotecas: TensorFlow/Keras, OpenCV, scikit-image e ferramentas opc
 - Treinar (exemplo mínimo):
 
 ```bash
-python run_training.py --dataset_path /caminho/para/dataset
+python train.py --dataset_path /caminho/para/dataset
 ```
 
 - Validar um checkpoint / modelo:
