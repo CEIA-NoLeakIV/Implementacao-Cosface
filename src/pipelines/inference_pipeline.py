@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.datasets import mnist
 
-from src.losses.margin_losses import CosFace
+from face_embeddings.src.models.Cosface.src.models.heads import CosFace
 
 def run_cosface_inference(cosface_config, inference_config):
     """

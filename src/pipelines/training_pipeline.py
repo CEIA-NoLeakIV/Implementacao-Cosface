@@ -3,13 +3,14 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, EarlyStopping
 
 from src.backbones.resnet import create_resnet50_cosface
 from src.data_loader.face_datasets import get_train_val_datasets
 from src.optimizers.scheduler import CosineAnnealingScheduler
-from src.losses.margin_losses import CosFace
+# Import relativo corrigido para evitar erros de caminho dependendo de onde o script é chamado
+from src.models.heads import CosFace 
 
 
 def plot_training_history(log_data, save_path):
@@ -70,10 +71,10 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
     checkpoint_path = os.path.join("experiments", "Resnet50_vgg_cropado_CelebA", "checkpoints", "epoch_{epoch:02d}.keras")
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-    log_path = os.path.join("experiments", "Resnet50_vgg_cropado_CelebA", "logs", "training_log.csv")
+    log_path = os.path.join("experiments", "Resnet50_training_run", "logs", "training_log.csv")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    figures_path = os.path.join("experiments", "Resnet50_vgg_cropado_CelebA", "figures")
+    figures_path = os.path.join("experiments", "Resnet50_training_run", "figures")
     os.makedirs(figures_path, exist_ok=True)
 
     # Carregar Dataset
@@ -87,7 +88,7 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
     )
     
     config.update_num_classes(num_classes_in_subset)
-    print(f"Número de classes no subset: {config.num_classes}")
+    print(f"Número de classes identificadas: {config.num_classes}")
 
     initial_epoch = 0
     model = None
@@ -132,6 +133,7 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
 
     # Criação do Modelo (se não carregado)
     if model is None:
+        print("Criando novo modelo ResNet50 + CosFace...")
         model, _, backbone = create_resnet50_cosface(config)
     else:
         backbone = model.get_layer("resnet50_backbone")
@@ -173,9 +175,6 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
     # --- FASE 2: Fine-tuning Completo ---
     print("\n--- FASE 2: Iniciando fine-tuning do modelo completo ---")
     backbone.trainable = True
-    if config.trainable_backbone_layers > 0:
-        for layer in backbone.layers[:-config.trainable_backbone_layers]:
-            layer.trainable = False
     
     cosface_layer.m = original_margin
     cosface_layer.s = original_scale
@@ -195,7 +194,17 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
     metrics = [tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
     model.compile(loss=crossentropy, optimizer=optimizer_finetune, metrics=metrics)
     
-    print("Sumário do modelo para fine-tuning:")
+    # Otimizador
+    # O treinamento moderno geralmente usa SGD com Momentum para ArcFace/CosFace ou Adam com LR baixo
+    learning_rate = config.learning_rate if hasattr(config, 'learning_rate') else 1e-4
+    optimizer = Adam(learning_rate=learning_rate) 
+    
+    # Função de Perda e Métricas
+    crossentropy = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+    metrics = [tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
+    
+    # Compilar Modelo
+    model.compile(loss=crossentropy, optimizer=optimizer, metrics=metrics)
     model.summary()
 
     current_lr = float(model.optimizer.learning_rate.numpy()) if hasattr(model.optimizer.learning_rate, 'numpy') else fine_tuning_lr
@@ -228,11 +237,20 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
         CSVLogger(log_path, append=True),
     ]
 
-    history = model.fit(train_dataset,
-                        epochs=config.epochs,
-                        callbacks=callbacks,
-                        initial_epoch=initial_epoch,
-                        verbose=1)
+    # Adicionar EarlyStopping se houver validação
+    if val_dataset is not None:
+        callbacks.append(EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1))
+
+    # --- EXECUÇÃO DO TREINO ---
+    print("Iniciando loop de treinamento...")
+    history = model.fit(
+        train_dataset,
+        validation_data=val_dataset,
+        epochs=config.epochs,
+        callbacks=callbacks,
+        initial_epoch=initial_epoch,
+        verbose=1
+    )
 
     # Plotar resultados finais
     if os.path.exists(log_path):
@@ -244,3 +262,13 @@ def run_face_training(config, dataset_path, resume_training=False, align_faces=F
             print(f"Erro ao gerar gráficos finais: {e}")
 
     print("\n--- Treinamento Concluído ---")
+    
+    # Plotar resultados finais
+    if os.path.exists(log_path):
+        try:
+            log_data = pd.read_csv(log_path)
+            plot_training_history(log_data, figures_path)
+        except Exception as e:
+            print(f"Erro ao plotar gráficos: {e}")
+
+    return model, history

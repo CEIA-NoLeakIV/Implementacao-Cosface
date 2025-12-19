@@ -10,19 +10,23 @@ __pycache__/
 # Notebooks e Dados
 .ipynb_checkpoints/
 data/
+datasets/
 
 # Modelos e Logs (Artefatos de Experimentos)
 models/
+modelss/
+experiments/
+evaluation_final_report/
 deliverables/
 reports/figures/*.png
 
+# Extensões de modelos pesados (Onde quer que estejam)
+*.pth
+*.ckpt
+*.h5
+*.keras
+*.zip
+*.onnx
+
 # Arquivos de Sistema
 .DS_Store
-
-# Arquivos de Checkpoint de Treinamento
-echo "*.pth" >> .gitignore
-echo "*.ckpt" >> .gitignore
-echo "data/datasets/" >> .gitignore
-echo "modelss/*.h5" >> .gitignore
-echo "modelss/*.keras" >> .gitignore
-echo "modelss/*.zip" >> .gitignore

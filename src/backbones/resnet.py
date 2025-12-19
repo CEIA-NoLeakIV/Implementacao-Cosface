@@ -11,7 +11,8 @@ from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 import tensorflow as tf
 
-from src.losses.margin_losses import CosFace
+# CORREÇÃO AQUI: Importação ajustada para usar o caminho relativo correto a partir da raiz 'src'
+from src.models.heads import CosFace
 
 def _build_classification_head(config, backbone_output):
     """Create the projection head that feeds the CosFace layer."""

@@ -1,0 +1,133 @@
+"""
+Script de Fine-tuning para Face Recognition - Versão Otimizada (SGD)
+Estratégias: 1 (Full), 2 (Partial), 3 (Differential LR)
+"""
+
+import sys
+import os
+import argparse
+import tensorflow as tf
+import pandas as pd
+import matplotlib.pyplot as plt
+from tensorflow.keras.optimizers import SGD, Adam
+from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, EarlyStopping
+
+# Configuração de GPU
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
+sys.path.append(os.getcwd())
+
+# Imports unificados das fontes corretas
+from src.data_loader.face_datasets import get_train_val_datasets
+from src.models.builder import build_face_model 
+from src.models.heads import CosFace
+from config.face_recognition_config import FaceRecognitionConfig
+
+def load_pretrained_model(model_path):
+    """Carrega o modelo garantindo que a camada CosFace seja reconhecida."""
+    return tf.keras.models.load_model(
+        model_path,
+        custom_objects={'CosFace': CosFace}
+    )
+
+def strategy_1_full_finetuning(model, config):
+    """Estratégia 1: Fine-tuning Completo (SGD Estável)"""
+    print("\nAPLICANDO FORMATO DE TREINO ESTÁVEL (SGD)")
+    model.trainable = True
+    optimizer = SGD(learning_rate=config.learning_rate, momentum=0.9, nesterov=True) #
+    model.compile(
+        optimizer=optimizer,
+        loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), #
+        metrics=[tf.keras.metrics.CategoricalAccuracy(name='accuracy')]
+    )
+    return model, optimizer
+
+def strategy_2_partial_finetuning(model, config, num_layers=10):
+    """Estratégia 2: Fine-tuning Parcial (Últimas N camadas do backbone)"""
+    backbone = model.get_layer("resnet50_backbone")
+    backbone.trainable = False
+    for layer in backbone.layers[-num_layers:]:
+        layer.trainable = True
+    
+    optimizer = SGD(learning_rate=config.learning_rate, momentum=0.9, nesterov=True) #
+    model.compile(
+        optimizer=optimizer,
+        loss=tf.keras.losses.CategoricalCrossentropy(from_logits=False), #
+        metrics=[tf.keras.metrics.CategoricalAccuracy(name='accuracy')]
+    )
+    return model, optimizer
+
+def strategy_3_differential_lr_finetuning(model, config):
+    """Estratégia 3: Differential LR (Simulada via SGD estável)"""
+    # Mantendo compatibilidade com seu desejo de não mexer na lógica da 3, 
+    # mas garantindo a compilação necessária.
+    optimizer = Adam(learning_rate=config.learning_rate * 0.1)
+    model.compile(optimizer=optimizer, loss=tf.keras.losses.CategoricalCrossentropy(), metrics=['accuracy'])
+    return model, optimizer
+
+def run_finetuning(strategy, pretrained_model_path, dataset_path, output_dir, epochs=30, 
+                   num_layers=10, batch_size=64, learning_rate=None):
+    
+    os.makedirs(output_dir, exist_ok=True)
+    ckpt_dir, log_dir = os.path.join(output_dir, "checkpoints"), os.path.join(output_dir, "logs")
+    os.makedirs(ckpt_dir, exist_ok=True); os.makedirs(log_dir, exist_ok=True)
+    
+    config = FaceRecognitionConfig()
+    config.batch_size = batch_size
+    config.learning_rate = learning_rate if learning_rate else 0.0005 # Valor padrão estável para Fine-tuning
+    config.epochs = epochs
+
+    # Carregar dataset
+    train_ds, val_ds, n_classes = get_train_val_datasets(dataset_path, config.image_size, config.batch_size)
+    config.num_classes = n_classes
+
+    # Reconstrução do modelo se o número de classes mudou
+    pretrained_model = load_pretrained_model(pretrained_model_path)
+    cosface_layer = pretrained_model.get_layer("cosface_loss")
+    
+    if cosface_layer.n_classes != config.num_classes:
+        print(f"Ajustando para {config.num_classes} classes.")
+        model = build_face_model(config)
+        try:
+            model.get_layer("resnet50_backbone").set_weights(pretrained_model.get_layer("resnet50_backbone").get_weights())
+            print("✓ Pesos do backbone transferidos.")
+        except: print("! Aviso: Falha na transferência parcial de pesos.")
+    else:
+        model = pretrained_model
+
+    # Aplicar Estratégias
+    if strategy == '1': model, opt = strategy_1_full_finetuning(model, config)
+    elif strategy == '2': model, opt = strategy_2_partial_finetuning(model, config, num_layers)
+    elif strategy == '3': model, opt = strategy_3_differential_lr_finetuning(model, config)
+
+    # Callbacks limpos (Sem LFW para não atrasar)
+    callbacks = [
+        ModelCheckpoint(os.path.join(ckpt_dir, "best_model.keras"), monitor='accuracy', save_best_only=True),
+        CSVLogger(os.path.join(log_dir, "finetuning_log.csv"), append=True),
+        EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
+    ]
+
+    # Treinar com verbose=2 para log linear no tmux
+    model.fit(train_ds, validation_data=val_ds, epochs=epochs, callbacks=callbacks, verbose=1)
+    model.save(os.path.join(output_dir, "final_finetuned_model.keras"))
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--strategy', type=str, required=True, choices=['1', '2', '3'])
+    parser.add_argument('--pretrained_model', type=str, required=True)
+    parser.add_argument('--dataset_path', type=str, required=True)
+    parser.add_argument('--output_dir', type=str, required=True)
+    parser.add_argument('--epochs', type=int, default=30)
+    parser.add_argument('--num_layers', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--learning_rate', type=float, default=None)
+    args = parser.parse_args()
+    
+    run_finetuning(args.strategy, args.pretrained_model, args.dataset_path, args.output_dir, 
+                   args.epochs, args.num_layers, args.batch_size, args.learning_rate)

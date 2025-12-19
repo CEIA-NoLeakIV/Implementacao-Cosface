@@ -115,27 +115,102 @@ O framework Cosface foi projetado para treinar e validar modelos de reconhecimen
    ```bash
    python run_training.py --dataset_path /path/to/dataset
    ```
+```markdown
+# Cosface — Framework de Treino, Finetuning e Validação
 
-2. **Validar um Modelo:**
-   ```bash
-   python run_validation.py --model_path /path/to/checkpoint --dataset_path /path/to/validation/dataset
-   ```
+Este repositório contém um framework modular para reconhecimento facial com a cabeça CosFace (loss) e backbones como ResNet. A documentação abaixo resume como executar treino, finetuning e validação, além de onde os artefatos (checkpoints, logs, figuras) são salvos.
 
-3. **Realizar Fine-tuning:**
-   ```bash
-   python run_finetuning.py \
-       --strategy 2 \
-       --pretrained_model experiments/Resnet50_vgg_cropado_CelebA/checkpoints/epoch_30.keras \
-       --dataset_path /dados/datasets/aligned_112x112/vggface2_dataset_all_splits_merged/ \
-       --output_dir experiments/finetuning_strategy2 \
-       --epochs 30 \
-       --num_layers 10
-   ```
-   Consulte `FINETUNING.md` para guia completo e exemplos detalhados.
+## Sumário rápido
+- Treino: `run_training.py` / `src/pipelines/training_pipeline.py`
+- Finetuning: `run_finetuning.py` (ver `FINETUNING.md` para detalhes avançados)
+- Validação / avaliação: `run_validation.py` e `evaluate.py`
+- Configs: `config/face_recognition_config.py`
+- Saída: `experiments/<nome_experimento>/` (checkpoints, logs, figures, final_model)
 
-4. **Estrutura de Resultados:**
-   - Checkpoints, logs e figuras são salvos na pasta `experiments/`.
+## Estrutura importante
+
+- `config/` — arquivos de configuração e hiperparâmetros
+- `src/` — código-fonte (backbones, data_loader, pipelines, models, utils)
+- `experiments/` — pastas de experimentos com subpastas:
+  - `checkpoints/` — modelos salvos por época (ex.: `epoch_01.keras`)
+  - `logs/` — CSV/JSON com histórico de treino/validação
+  - `figures/` — gráficos de loss/accuracy e outros plots
+  - `final_model*.keras` — modelo final salvo
+
+## Requisitos
+
+Instale as dependências listadas em `requirements.txt` (está no diretório raiz deste subprojeto):
+
+```bash
+pip install -r requirements.txt
+```
+
+Principais bibliotecas: TensorFlow/Keras, OpenCV, scikit-image e ferramentas opcionais (RetinaFace) usadas somente na validação/filtragem.
+
+## Quickstart — comandos principais
+
+- Treinar (exemplo mínimo):
+
+```bash
+python run_training.py --dataset_path /caminho/para/dataset
+```
+
+- Validar um checkpoint / modelo:
+
+```bash
+python run_validation.py --model_path experiments/<exp>/checkpoints/epoch_10.keras --dataset_path /caminho/para/val
+```
+
+- Finetuning (exemplo):
+
+```bash
+python run_finetuning.py \
+  --strategy 2 \
+  --pretrained_model experiments/Resnet50_vgg_cropado_CelebA/checkpoints/epoch_30.keras \
+  --dataset_path /dados/datasets/aligned_112x112/ \
+  --output_dir experiments/finetuning_strategy2 \
+  --epochs 30 \
+  --batch_size 64
+```
+
+Consulte `FINETUNING.md` para opções detalhadas (estratégias, `--num_layers`, `--use_retinaface`, etc.).
+
+## Onde ficam os artefatos e como são nomeados
+
+- Checkpoints: `experiments/<nome>/checkpoints/epoch_XX_val_acc_YY.keras` — salvos a cada época quando configurado.
+- Modelo final: `experiments/<nome>/final_model*.keras` ou `final_model_<strategy>.keras`.
+- Logs: `experiments/<nome>/logs/*.csv` (histórico de loss/accuracy e lr).
+- Figuras: `experiments/<nome>/figures/*` (gráficos PNG com histórico).
+- Relatórios de avaliação: `evaluation_final_report/` (quando gerado pelos scripts de avaliação).
+
+Observação: a estrutura exata pode variar conforme o `output_dir` passado aos scripts; adapte os caminhos conforme seu experimento.
+
+## Como carregar um modelo salvo (exemplo)
+
+```python
+import tensorflow as tf
+from src.models.heads import heads  # ajustar conforme implementação real
+
+# Exemplo genérico: carregar modelo Keras com custom objects, se necessário
+model = tf.keras.models.load_model('experiments/finetuning_strategy1/final_model_full_fine-tuning.keras',
+                                   compile=False)
+
+# Use model.predict(...) ou extraia embeddings conforme o pipeline de inferência.
+```
+
+## Plots e visualizações
+
+- Os gráficos gerados (loss/accuracy) ficam em `experiments/<nome>/figures/`.
+- Os logs CSV podem ser carregados com Pandas para gerar análises customizadas.
+
+## Dicas rápidas
+
+- Para testar rapidamente, use um dataset pequeno e `--epochs 5`.
+- Se ocorrer OOM, reduza `--batch_size` ou use estratégia 2 (treinar menos camadas).
+- Use `--use_retinaface` nas validações quando seu dataset tiver imagens sem rosto ou ruído (veja `FINETUNING.md`).
 
 ---
 
-Este documento serve como guia para entender e usar o framework Cosface. Para dúvidas ou melhorias, contribua diretamente no repositório!
+Se quiser, posso também gerar um README reduzido em inglês ou adicionar exemplos de comandos com paths absolutos do seu ambiente. Basta pedir.
+
+```
