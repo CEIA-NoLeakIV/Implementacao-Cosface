@@ -102,24 +102,26 @@ def get_train_val_datasets(path, image_size, batch_size, validation_split=0.02, 
         )
         num_classes_to_use = len(os.listdir(path))
 
-    # As funções de pré-processamento e o resto do pipeline permanecem os mesmos
     def augment_and_prepare(image, label):
-        one_hot_label = label # O label já vem como one-hot de image_dataset_from_directory
-        image = data_augmentation(image, training=True)
+        """Prepara dados de treino com aumento e mapeia nomes do builder.py"""
         image = tf.keras.applications.resnet50.preprocess_input(image)
-        # Retornar features como lista [image, label] para evitar ambiguidade no Keras
-        return [image, one_hot_label], one_hot_label
+        image = data_augmentation(image, training=True)
+        # Retorna dicionário para as camadas Input: image_input e label_input
+        return {"image_input": image, "label_input": label}, label
 
     def validate_and_prepare(image, label):
-        one_hot_label = label # O label já vem como one-hot
+        """Prepara dados de validação sem aumento"""
         image = tf.keras.applications.resnet50.preprocess_input(image)
-        return [image, one_hot_label], one_hot_label
+        return {"image_input": image, "label_input": label}, label
 
-    train_ds = train_ds.map(augment_and_prepare, num_parallel_calls=tf.data.AUTOTUNE).prefetch(tf.data.AUTOTUNE)
-    val_ds = val_ds.map(validate_and_prepare, num_parallel_calls=tf.data.AUTOTUNE).prefetch(tf.data.AUTOTUNE)
+    # Aplica o mapeamento
+    train_ds = train_ds.map(augment_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
+    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
+
+    val_ds = val_ds.map(validate_and_prepare, num_parallel_calls=tf.data.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
 
     return train_ds, val_ds, num_classes_to_use
-
 
 class LFWValidationCallback(tf.keras.callbacks.Callback):
     """Valida o modelo no LFW com embeddings normalizados e threshold dinâmico."""
