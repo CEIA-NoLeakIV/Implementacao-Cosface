@@ -1,0 +1,31 @@
+======================================================================
+TRAINING SUMMARY - resnet50_MCP
+======================================================================
+
+Total Epochs: 30
+Total Training Time: 22.02 hours
+Average Epoch Time: 2642.50 seconds
+
+FACE VALIDATION: DISABLED
+
+BEST METRICS:
+----------------------------------------
+Best Train Loss: 0.7281 (Epoch 30)
+Best Train Accuracy: 0.9461 (Epoch 30)
+Best Val Accuracy: 0.7937 (Epoch 28)
+Best External Accuracy: 0.0000 (Epoch 1)
+Best F1 Score: 0.0000 (Epoch 1)
+Best AUC Score: 0.0000 (Epoch 1)
+
+FINAL METRICS (Last Epoch):
+----------------------------------------
+Train Loss: 0.7281
+Train Accuracy: 0.9461
+Val Accuracy: 0.7934
+External Accuracy: 0.0000
+F1 Score: 0.0000
+Precision: 0.0000
+Recall: 0.0000
+AUC Score: 0.0000
+
+======================================================================

@@ -1,0 +1,16 @@
+{
+  "epoch": 24,
+  "train_loss": 0.8430693755965588,
+  "train_accuracy": 0.9379246920770424,
+  "val_loss": null,
+  "val_accuracy": 0.7931300859397632,
+  "learning_rate": 0.0001,
+  "epoch_time": 1038.9941947460175,
+  "external_similarity": 0.0,
+  "external_accuracy": 0.0,
+  "external_f1": 0.0,
+  "external_precision": 0.0,
+  "external_recall": 0.0,
+  "external_auc": 0.0,
+  "timestamp": "2025-12-15T01:17:05.916994"
+}
