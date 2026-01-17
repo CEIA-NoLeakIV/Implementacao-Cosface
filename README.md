@@ -1,4 +1,3 @@
-````markdown
 # Face Recognition System: CosFace + Milvus Standalone
 
 Este repositório contém uma plataforma modular e de alta performance para reconhecimento facial, integrando o backbone **ResNet50** (otimizado com **CosFace Loss**) ao banco de dados vetorial **Milvus Standalone**.
