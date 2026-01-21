@@ -1,27 +1,40 @@
+# Local: src/models/builder.py
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Activation
-from tensorflow.keras.models import Model
-from .backbones import build_resnet50_backbone
-from .heads import CosFace
+from src.models.backbones import build_resnet50_backbone
+from src.models.heads import CosFace
 
 def build_face_model(config):
-    """Constrói o modelo completo integrando backbone e cabeça CosFace."""
-    image_input = Input(shape=(*config.image_size, 3), name="image_input")
-    label_input = Input(shape=(config.num_classes,), name="label_input")
-
-    # 1. Extrator de características (Backbone)
+    """
+    Monta o modelo completo de Reconhecimento Facial:
+    Input Image + Input Label -> Backbone -> CosFace Layer -> Softmax Output
+    """
+    # 1. Construir Backbone
     backbone = build_resnet50_backbone(
-        input_shape=(*config.image_size, 3), 
+        input_shape=config.image_size + (3,) if isinstance(config.image_size, tuple) else (config.image_size, config.image_size, 3),
         embedding_size=512
     )
-    embedding = backbone(image_input)
-
-    # 2. Cabeça CosFace
-    # Note que passamos o label como entrada para a camada durante o treino
-    logits = CosFace(n_classes=config.num_classes, name="cosface_loss")([embedding, label_input])
     
-    # 3. Saída com Softmax
-    output = Activation('softmax', name="cosine_softmax")(logits)
-
-    model = Model(inputs=[image_input, label_input], outputs=output)
+    # 2. Definir Inputs do Modelo Final
+    input_image = backbone.input
+    input_label = tf.keras.layers.Input(shape=(config.num_classes,), name="input_label") # One-hot esperado
+    
+    # 3. Obter Embedding
+    embedding = backbone(input_image)
+    
+    # 4. Aplicar Camada CosFace
+    # Importante: O nome 'cosface_loss' ajuda na identificação posterior para validação
+    cosface_layer = CosFace(n_classes=config.num_classes, 
+                            s=30.0, 
+                            m=0.35, 
+                            name="cosface_loss")
+    
+    output = cosface_layer([embedding, input_label])
+    
+    # 5. Saída Final (Softmax)
+    # CosFace retorna logits, então aplicamos softmax para calcular a loss padrão
+    output = tf.keras.layers.Activation('softmax', name="predictions")(output)
+    
+    # 6. Criar Modelo Keras
+    model = tf.keras.models.Model(inputs=[input_image, input_label], outputs=output, name="cosface_model")
+    
     return model
