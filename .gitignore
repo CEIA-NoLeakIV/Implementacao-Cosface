@@ -13,7 +13,6 @@ data/
 datasets/
 
 # Modelos e Logs (Artefatos de Experimentos)
-modelss/
 experiments/
 evaluation_final_report/
 deliverables/
