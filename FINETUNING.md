@@ -88,9 +88,9 @@ Exemplo genérico:
 ```bash
 python run_finetuning.py \
   --strategy 2 \
-  --pretrained_model /caminho/para/pretrained.keras \
-  --dataset_path /caminho/para/dataset \
-  --output_dir experiments/finetuning_experiment \
+  --pretrained_model /caminho/para/o/peso pré-treinado \
+  --dataset_path /caminho/para/o/dataset \
+  --output_dir /home/ubuntu/noleak/face_embeddings/src/models/Cosface/experiments/finetuning_strategy2 \
   --epochs 30 \
   --batch_size 64
 ```
