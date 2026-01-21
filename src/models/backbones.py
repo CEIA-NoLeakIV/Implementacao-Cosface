@@ -1,15 +1,16 @@
 import tensorflow as tf
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation, Input, MaxPooling2D, Flatten, GlobalAveragePooling2D
+from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation, Input, MaxPooling2D, Dropout, Flatten, GlobalAveragePooling2D
 from tensorflow.keras import regularizers
 
 def build_resnet50_backbone(input_shape=(112, 112, 3), embedding_size=512):
-    """Backbone padrão ResNet50 conforme configurado no nosso treino estável."""
+    """Gera o extrator de características ResNet50."""
     base_model = ResNet50(include_top=False, weights='imagenet', input_shape=input_shape)
     x = base_model.output
     x = GlobalAveragePooling2D()(x)
     x = Dense(embedding_size, name="embedding_layer")(x)
+    # A normalização L2 final é feita dentro da camada CosFace
     return Model(inputs=base_model.input, outputs=x, name="resnet50_backbone")
 
 def vgg_block(x, filters, layers, weight_decay=1e-4):
@@ -20,7 +21,8 @@ def vgg_block(x, filters, layers, weight_decay=1e-4):
         x = Activation('relu')(x)
     return x
 
-def build_vgg8_backbone(input_shape=(28, 28, 1), embedding_size=512):
+def build_vgg8_backbone(input_shape=(112, 112, 3), embedding_size=512):
+    """Versão leve para testes rápidos, similar ao que estava em archs.py."""
     input_layer = Input(shape=input_shape)
     x = vgg_block(input_layer, 16, 2)
     x = MaxPooling2D(pool_size=(2, 2))(x)
@@ -30,5 +32,4 @@ def build_vgg8_backbone(input_shape=(28, 28, 1), embedding_size=512):
     x = MaxPooling2D(pool_size=(2, 2))(x)
     x = Flatten()(x)
     x = Dense(embedding_size, kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
     return Model(inputs=input_layer, outputs=x, name="vgg8_backbone")
