@@ -168,9 +168,9 @@ python run_validation.py --model_path experiments/<exp>/checkpoints/epoch_10.ker
 ```bash
 python run_finetuning.py \
   --strategy 2 \
-  --pretrained_model experiments/Resnet50_vgg_cropado_CelebA/checkpoints/epoch_30.keras \
-  --dataset_path /dados/datasets/aligned_112x112/ \
-  --output_dir experiments/finetuning_strategy2 \
+  --pretrained_model /home/ubuntu/noleak/face_embeddings/src/models/Cosface/experiments/clean_run/checkpoints/epoch_30_val_acc_0.9064.keras \
+  --dataset_path /home/ubuntu/noleak/EmbeddingFramework/data/vggface2_HQ_cropado/insightface_aligned_112x112/train \
+  --output_dir /home/ubuntu/noleak/face_embeddings/src/models/Cosface/experiments/finetuning_strategy2 \
   --epochs 30 \
   --batch_size 64
 ```
